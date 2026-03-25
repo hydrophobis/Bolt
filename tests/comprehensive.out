@@ -1,0 +1,57 @@
+=== Arithmetic Tests ===
+add(5, 3) = 8
+subtract(5, 3) = 2
+multiply(5, 3) = 15
+divide(15, 3) = 5
+power_of_two(3) = 8
+
+=== Bitwise Tests ===
+bitwise_and(12, 10) = 8
+bitwise_or(12, 10) = 14
+bitwise_xor(12, 10) = 6
+left_shift(5, 2) = 20
+right_shift(20, 2) = 5
+
+=== Comparison Tests ===
+5 == 5: 1
+5 != 3: 1
+3 < 5: 1
+5 > 3: 1
+5 <= 5: 1
+5 >= 3: 1
+
+=== Logical Tests ===
+1 && 1: 1
+1 || 0: 1
+!0: 1
+
+=== Conditional Tests ===
+sign(5) = 1
+sign(-5) = -1
+sign(0) = 0
+classify_number(5) = 1
+classify_number(15) = 2
+classify_number(-5) = -1
+
+=== Switch Test ===
+Wednesday
+
+=== Loop Tests ===
+sum_to(5) = 15
+factorial(5) = 120
+sum_matrix() = 36
+
+=== Array Test ===
+array_sum() = 150
+
+=== Struct Tests ===
+test_struct() = 30
+test_multiple_structs() = 497
+
+=== Initialization Test ===
+test_initialization() = 30
+
+=== Scope Test ===
+test_scope() = 300
+
+=== All Tests Completed ===

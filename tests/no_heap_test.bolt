@@ -1,0 +1,6 @@
+int main() {
+    string s = "oops"; // Error in no-heap
+    Player* p = new Player(); // Error in no-heap
+    return 0;
+}
+class Player {}

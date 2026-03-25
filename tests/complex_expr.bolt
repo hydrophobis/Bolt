@@ -1,0 +1,33 @@
+import std.io
+
+class Player {
+    int score;
+    void addScore(int s) { self.score += s; }
+    void printScore() { printf("Score: %d\n", self.score); }
+}
+
+Player* create_player() {
+    return new Player();
+}
+
+int main() {
+    // Chained call on temporary from new
+    (new Player()).addScore(10);
+
+    // Call on function result
+    Player* p = create_player();
+    p.addScore(20);
+    p.printScore();
+
+    // Nested pointer access
+    Nested outer;
+    outer.player = new Player();
+    outer.player.addScore(30);
+    outer.player.printScore();
+
+    return 0;
+}
+
+class Nested {
+    Player* player;
+}

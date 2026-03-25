@@ -1,0 +1,15 @@
+import std.io
+
+class Test2 {
+    void init() { printf("Init2\n"); }
+    void dinit() { printf("Dinit2\n"); }
+}
+class Test {
+    void init() { printf("Init\n"); }
+    void dinit() { printf("Dinit\n"); }
+}
+int main() {
+    { Test t; }
+    { Test2 t; }
+    return 0;
+}

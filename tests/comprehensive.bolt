@@ -1,0 +1,364 @@
+import std.io
+
+// Test comment handling
+// Multi-line comments should work fine
+
+struct Point {
+    int x;
+    int y;
+};
+
+struct Color {
+    int r;
+    int g;
+    int b;
+};
+
+// Test basic function with multiple parameters
+int add(int a, int b) {
+    return a + b;
+}
+
+int subtract(int a, int b) {
+    return a - b;
+}
+
+int multiply(int a, int b) {
+    return a * b;
+}
+
+int divide(int a, int b) {
+    return a / b;
+}
+
+// Test more arithmetic
+int power_of_two(int n) {
+    int result = 1;
+    int i;
+    for (i = 0; i < n; i = i + 1) {
+        result = result * 2;
+    }
+    return result;
+}
+
+// Test comparison operators
+int compare_equal(int a, int b) {
+    if (a == b) return 1;
+    return 0;
+}
+
+int compare_not_equal(int a, int b) {
+    if (a != b) return 1;
+    return 0;
+}
+
+int compare_less(int a, int b) {
+    if (a < b) return 1;
+    return 0;
+}
+
+int compare_greater(int a, int b) {
+    if (a > b) return 1;
+    return 0;
+}
+
+int compare_less_equal(int a, int b) {
+    if (a <= b) return 1;
+    return 0;
+}
+
+int compare_greater_equal(int a, int b) {
+    if (a >= b) return 1;
+    return 0;
+}
+
+// Test logical operators
+int logical_and(int a, int b) {
+    if (a && b) return 1;
+    return 0;
+}
+
+int logical_or(int a, int b) {
+    if (a || b) return 1;
+    return 0;
+}
+
+int logical_not(int a) {
+    if (!a) return 1;
+    return 0;
+}
+
+// Test if/else statements
+int sign(int n) {
+    if (n > 0) return 1;
+    if (n < 0) return -1;
+    return 0;
+}
+
+// Test nested if/else
+int classify_number(int n) {
+    if (n == 0) {
+        return 0;
+    } else {
+        if (n > 0) {
+            if (n < 10) {
+                return 1;
+            } else {
+                return 2;
+            }
+        } else {
+            return -1;
+        }
+    }
+}
+
+// Test switch statement
+int day_of_week(int day) {
+    switch (day) {
+        case 1:
+            printf("Monday\n");
+            break;
+        case 2:
+            printf("Tuesday\n");
+            break;
+        case 3:
+            printf("Wednesday\n");
+            break;
+        case 4:
+            printf("Thursday\n");
+            break;
+        case 5:
+            printf("Friday\n");
+            break;
+        case 6:
+            printf("Saturday\n");
+            break;
+        case 7:
+            printf("Sunday\n");
+            break;
+    }
+    return day;
+}
+
+// Test while loop
+int sum_to(int n) {
+    int sum = 0;
+    int i = 1;
+    while (i <= n) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+
+// Test for loop
+int factorial(int n) {
+    int result = 1;
+    int i;
+    for (i = 2; i <= n; i = i + 1) {
+        result = result * i;
+    }
+    return result;
+}
+
+// Test increment operators
+int test_increment() {
+    int x = 5;
+    int y = x++;
+    printf("Post-increment: y=%d, x=%d\n", y, x);
+    return x;
+}
+
+// Test decrement operators
+int test_decrement() {
+    int x = 5;
+    int y = x--;
+    printf("Post-decrement: y=%d, x=%d\n", y, x);
+    return x;
+}
+
+// Test compound assignment operators
+int test_compound_assignment() {
+    int x = 10;
+    x += 5;
+    x -= 3;
+    x *= 2;
+    x /= 4;
+    return x;
+}
+
+// Test nested loops
+int sum_matrix() {
+    int sum = 0;
+    int i;
+    int j;
+    for (i = 1; i <= 3; i = i + 1) {
+        for (j = 1; j <= 3; j = j + 1) {
+            sum = sum + i + j;
+        }
+    }
+    return sum;
+}
+
+// Test array operations
+int array_sum() {
+    int arr[5];
+    int sum = 0;
+    int i;
+    
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    arr[3] = 40;
+    arr[4] = 50;
+    
+    for (i = 0; i < 5; i = i + 1) {
+        sum = sum + arr[i];
+    }
+    return sum;
+}
+
+// Test struct usage
+int test_struct() {
+    Point p;
+    p.x = 10;
+    p.y = 20;
+    return p.x + p.y;
+}
+
+// Test multiple struct instances
+int test_multiple_structs() {
+    Point p1;
+    Point p2;
+    Color c1;
+    
+    p1.x = 5;
+    p1.y = 10;
+    p2.x = 15;
+    p2.y = 20;
+    
+    c1.r = 255;
+    c1.g = 128;
+    c1.b = 64;
+    
+    return p1.x + p1.y + p2.x + p2.y + c1.r + c1.g + c1.b;
+}
+
+// Test string operations
+int test_strings() {
+    printf("String test\n");
+    printf("Another string\n");
+    printf("Numbers: %d %d\n", 42, 100);
+    return 0;
+}
+
+// Bitwise utility functions used in tests
+int bitwise_and(int a, int b) { return a & b; }
+int bitwise_or(int a, int b) { return a | b; }
+int bitwise_xor(int a, int b) { return a ^ b; }
+int left_shift(int a, int b) { return a << b; }
+int right_shift(int a, int b) { return a >> b; }
+
+// Test variable declarations with initialization
+int test_initialization() {
+    int a = 10;
+    int b = 20;
+    int c = a + b;
+    return c;
+}
+
+// Test local scope
+int test_scope() {
+    int x = 100;
+    if (x > 50) {
+        int y = 200;
+        x = x + y;
+    }
+    return x;
+}
+
+// Test function that returns 0
+int always_zero() {
+    return 0;
+}
+
+// Test function that returns non-zero
+int always_one() {
+    return 1;
+}
+
+// Test main function with all features
+int main() {
+    int result = 0;
+    
+    // Test basic arithmetic
+    printf("=== Arithmetic Tests ===\n");
+    printf("add(5, 3) = %d\n", add(5, 3));
+    printf("subtract(5, 3) = %d\n", subtract(5, 3));
+    printf("multiply(5, 3) = %d\n", multiply(5, 3));
+    printf("divide(15, 3) = %d\n", divide(15, 3));
+    printf("power_of_two(3) = %d\n", power_of_two(3));
+    
+    // Test bitwise operators
+    printf("\n=== Bitwise Tests ===\n");
+    printf("bitwise_and(12, 10) = %d\n", bitwise_and(12, 10));
+    printf("bitwise_or(12, 10) = %d\n", bitwise_or(12, 10));
+    printf("bitwise_xor(12, 10) = %d\n", bitwise_xor(12, 10));
+    printf("left_shift(5, 2) = %d\n", left_shift(5, 2));
+    printf("right_shift(20, 2) = %d\n", right_shift(20, 2));
+    
+    // Test comparison operators
+    printf("\n=== Comparison Tests ===\n");
+    printf("5 == 5: %d\n", compare_equal(5, 5));
+    printf("5 != 3: %d\n", compare_not_equal(5, 3));
+    printf("3 < 5: %d\n", compare_less(3, 5));
+    printf("5 > 3: %d\n", compare_greater(5, 3));
+    printf("5 <= 5: %d\n", compare_less_equal(5, 5));
+    printf("5 >= 3: %d\n", compare_greater_equal(5, 3));
+    
+    // Test logical operators
+    printf("\n=== Logical Tests ===\n");
+    printf("1 && 1: %d\n", logical_and(1, 1));
+    printf("1 || 0: %d\n", logical_or(1, 0));
+    printf("!0: %d\n", logical_not(0));
+    
+    // Test conditional logic
+    printf("\n=== Conditional Tests ===\n");
+    printf("sign(5) = %d\n", sign(5));
+    printf("sign(-5) = %d\n", sign(-5));
+    printf("sign(0) = %d\n", sign(0));
+    printf("classify_number(5) = %d\n", classify_number(5));
+    printf("classify_number(15) = %d\n", classify_number(15));
+    printf("classify_number(-5) = %d\n", classify_number(-5));
+    
+    // Test switch
+    printf("\n=== Switch Test ===\n");
+    day_of_week(3);
+    
+    // Test loops
+    printf("\n=== Loop Tests ===\n");
+    printf("sum_to(5) = %d\n", sum_to(5));
+    printf("factorial(5) = %d\n", factorial(5));
+    printf("sum_matrix() = %d\n", sum_matrix());
+    
+    // Test arrays
+    printf("\n=== Array Test ===\n");
+    printf("array_sum() = %d\n", array_sum());
+    
+    // Test structs
+    printf("\n=== Struct Tests ===\n");
+    printf("test_struct() = %d\n", test_struct());
+    printf("test_multiple_structs() = %d\n", test_multiple_structs());
+    
+    // Test initialization
+    printf("\n=== Initialization Test ===\n");
+    printf("test_initialization() = %d\n", test_initialization());
+    
+    // Test scope
+    printf("\n=== Scope Test ===\n");
+    printf("test_scope() = %d\n", test_scope());
+    
+    printf("\n=== All Tests Completed ===\n");
+    
+    return 0;
+}

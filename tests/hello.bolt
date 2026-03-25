@@ -1,0 +1,5 @@
+import std.io
+int main() {
+    printf("Hello, Bolt!\n");
+    return 0;
+}

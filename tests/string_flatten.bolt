@@ -1,0 +1,6 @@
+import std.io
+int main() {
+    string s = "A" + "B" + "C" + "D";
+    printf("%s\n", s);
+    return 0;
+}

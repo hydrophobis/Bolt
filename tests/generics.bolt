@@ -1,0 +1,25 @@
+import std.io
+
+class Box<T> {
+    T value;
+    void set(T v) { self.value = v; }
+    T get() { return self.value; }
+}
+
+int main() {
+    Box<int> b;
+    b.set(42);
+    printf("Box value: %d\n", b.get());
+
+    Box<string> s;
+    s.set("Hello Generics");
+    printf("Box value: %s\n", s.get());
+
+    printf("Identity: %d\n", identity<int>(123));
+
+    return 0;
+}
+
+T identity<T>(T x) {
+    return x;
+}

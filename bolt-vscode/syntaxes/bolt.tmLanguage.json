@@ -1,0 +1,183 @@
+{
+  "name": "Bolt",
+  "scopeName": "source.bolt",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#char-literals" },
+    { "include": "#decorators" },
+    { "include": "#package-import" },
+    { "include": "#class-struct-decl" },
+    { "include": "#impl-decl" },
+    { "include": "#operator-overload" },
+    { "include": "#function-decl" },
+    { "include": "#control-keywords" },
+    { "include": "#storage-types" },
+    { "include": "#modifier-keywords" },
+    { "include": "#special-keywords" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#self-keyword" },
+    { "include": "#function-call" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.bolt",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.bolt" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.bolt" } }
+        },
+        {
+          "name": "comment.line.double-slash.bolt",
+          "begin": "//",
+          "end": "$",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.bolt" } }
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.bolt",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.bolt" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.bolt" } },
+      "patterns": [
+        { "name": "constant.character.escape.bolt", "match": "\\\\(n|t|r|\\\\|\"|'|0|x[0-9a-fA-F]{2})" },
+        { "name": "invalid.illegal.escape.bolt", "match": "\\\\." }
+      ]
+    },
+    "char-literals": {
+      "name": "string.quoted.single.bolt",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.bolt" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.bolt" } },
+      "patterns": [
+        { "name": "constant.character.escape.bolt", "match": "\\\\." }
+      ]
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "name": "meta.decorator.bolt",
+          "match": "(!?)(@)([a-zA-Z_][a-zA-Z0-9_]*)(\\([^)]*\\))?",
+          "captures": {
+            "1": { "name": "keyword.operator.logical.bolt" },
+            "2": { "name": "punctuation.decorator.bolt" },
+            "3": { "name": "entity.name.tag.decorator.bolt" },
+            "4": { "name": "meta.decorator.arguments.bolt" }
+          }
+        }
+      ]
+    },
+    "package-import": {
+      "patterns": [
+        {
+          "name": "meta.package.bolt",
+          "match": "\\b(package)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.bolt" },
+            "2": { "name": "entity.name.namespace.bolt" }
+          }
+        },
+        {
+          "name": "meta.import.bolt",
+          "match": "\\b(import)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.import.bolt" },
+            "2": { "name": "entity.name.namespace.bolt" }
+          }
+        }
+      ]
+    },
+    "class-struct-decl": {
+      "name": "meta.class.bolt",
+      "match": "\\b(class|struct)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:<([^>]*)>)?",
+      "captures": {
+        "1": { "name": "keyword.other.bolt" },
+        "2": { "name": "entity.name.type.class.bolt" },
+        "3": { "name": "entity.name.type.parameter.bolt" }
+      }
+    },
+    "impl-decl": {
+      "name": "meta.impl.bolt",
+      "match": "\\b(impl)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.bolt" },
+        "2": { "name": "entity.name.type.bolt" }
+      }
+    },
+    "operator-overload": {
+      "name": "meta.operator-overload.bolt",
+      "match": "\\b(operator)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.operator.bolt" }
+      }
+    },
+    "function-decl": {
+      "patterns": [
+        {
+          "name": "meta.function.bolt",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_*]*)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:<([^>]*)>)?\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "storage.type.bolt" },
+            "2": { "name": "entity.name.function.bolt" },
+            "3": { "name": "entity.name.type.parameter.bolt" }
+          }
+        }
+      ]
+    },
+    "control-keywords": {
+      "name": "keyword.control.bolt",
+      "match": "\\b(if|else|while|for|do|return|break|continue|switch|case|default|goto)\\b"
+    },
+    "storage-types": {
+      "name": "storage.type.bolt",
+      "match": "\\b(void|int|char|float|double|string|long|short|unsigned|signed|auto|bool)\\b"
+    },
+    "modifier-keywords": {
+      "name": "storage.modifier.bolt",
+      "match": "\\b(static|inline|extern|const|volatile|restrict|register|typedef|enum|union)\\b"
+    },
+    "special-keywords": {
+      "name": "keyword.other.bolt",
+      "match": "\\b(new|delete|sizeof|class|struct|impl|operator|package|import|public|private|protected)\\b"
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.boolean.bolt", "match": "\\b(true|false)\\b" },
+        { "name": "constant.language.null.bolt", "match": "\\b(NULL|nullptr)\\b" }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.bolt", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+        { "name": "constant.numeric.float.bolt", "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?[fF]?\\b" },
+        { "name": "constant.numeric.integer.bolt", "match": "\\b\\d+[uUlL]*\\b" }
+      ]
+    },
+    "self-keyword": {
+      "name": "variable.language.self.bolt",
+      "match": "\\bself\\b"
+    },
+    "function-call": {
+      "name": "entity.name.function.bolt",
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.comparison.bolt", "match": "(==|!=|<=|>=|<|>)" },
+        { "name": "keyword.operator.assignment.bolt", "match": "(\\+=|-=|\\*=|/=|=)" },
+        { "name": "keyword.operator.arithmetic.bolt", "match": "(\\+\\+|--|\\+|-|\\*|/|%)" },
+        { "name": "keyword.operator.logical.bolt", "match": "(&&|\\|\\||!)" },
+        { "name": "keyword.operator.bitwise.bolt", "match": "(&|\\||\\^|~|<<|>>)" },
+        { "name": "keyword.operator.member.bolt", "match": "(->|\\.)" },
+        { "name": "keyword.operator.ternary.bolt", "match": "(\\?|:)" }
+      ]
+    }
+  }
+}

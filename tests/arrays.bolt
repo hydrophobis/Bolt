@@ -1,0 +1,31 @@
+import std.io;
+
+int main() {
+    [int; 5] arr;
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[4] = 50;
+
+    printf("arr[0] = %d\n", arr[0]);
+    printf("arr[1] = %d\n", arr[1]);
+    printf("arr[4] = %d\n", arr[4]);
+
+    Matrix m;
+    m.data[0] = 1;
+    m.data[9] = 99;
+    printf("m.data[0] = %d\n", m.data[0]);
+    printf("m.data[9] = %d\n", m.data[9]);
+
+    [ [int; 3]; 2 ] grid;
+    grid[0][0] = 1;
+    grid[0][1] = 2;
+    grid[1][2] = 6;
+    printf("grid[0][1] = %d\n", grid[0][1]);
+    printf("grid[1][2] = %d\n", grid[1][2]);
+
+    return 0;
+}
+
+class Matrix {
+    [int; 10] data;
+}

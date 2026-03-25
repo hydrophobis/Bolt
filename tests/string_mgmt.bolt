@@ -1,0 +1,9 @@
+import std.io
+
+int main() {
+    string s = "Hello";
+    s = s + " World";
+    s += "!";
+    printf("%s\n", s);
+    return 0;
+}

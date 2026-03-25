@@ -1,0 +1,8 @@
+# Started from `gradle init`; keep dependency versions tidy here.
+# https://docs.gradle.org/current/userguide/platforms.html#sub::toml-dependencies-format
+
+[versions]
+guava = "33.4.6-jre"
+
+[libraries]
+guava = { module = "com.google.guava:guava", version.ref = "guava" }

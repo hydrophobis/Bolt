@@ -1,0 +1,44 @@
+{
+  "name": "bolt-lang",
+  "displayName": "Bolt Language",
+  "description": "Syntax highlighting and language support for the Bolt language",
+  "version": "0.1.0",
+  "publisher": "hydro",
+  "repository": { "type": "git", "url": "https://github.com/hydro/bolt" },
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:bolt"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "bolt",
+        "aliases": ["Bolt", "bolt"],
+        "extensions": [".bolt"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bolt",
+        "scopeName": "source.bolt",
+        "path": "./syntaxes/bolt.tmLanguage.json"
+      }
+    ],
+    "themes": []
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  }
+}

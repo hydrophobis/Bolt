@@ -1,0 +1,58 @@
+/*
+ * Started from `gradle init` and customized for Bolt's CLI app.
+ *
+ * For more details on building Java & JVM projects, see:
+ * https://docs.gradle.org/9.2.1/userguide/building_java_projects.html
+ * This project uses @Incubating APIs which are subject to change.
+ */
+
+plugins {
+    // Apply the application plugin to add support for building a CLI application in Java.
+    id 'application'
+}
+
+repositories {
+    // Use Maven Central for resolving dependencies.
+    mavenCentral()
+}
+
+dependencies {
+    // This dependency is used by the application.
+    implementation libs.guava
+}
+
+testing {
+    suites {
+        // Configure the built-in test suite
+        test {
+            // Use JUnit Jupiter test framework
+            useJUnitJupiter('5.12.1')
+        }
+    }
+}
+
+// Apply a specific Java toolchain to ease working on different environments.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+application {
+    // Define the main class for the application.
+    mainClass = 'hydro.bolt.Bolt'
+}
+
+run {
+    if (project.hasProperty("args")) {
+        args project.getProperty("args").split()
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+            'Main-Class': 'hydro.bolt.Bolt'
+        )
+    }
+}

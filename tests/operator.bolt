@@ -1,0 +1,8 @@
+import std.io
+operator int int + int {
+    return a + b + 1;
+}
+int main() {
+    printf("%d\n", 1 + 1);
+    return 0;
+}

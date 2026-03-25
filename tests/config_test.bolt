@@ -1,0 +1,25 @@
+struct Point {
+    int x;
+    int y;
+
+    init(int x, int y) {
+        self.x = x;
+        self.y = y;
+    }
+
+    @mangle
+    int sum() {
+        return self.x + self.y;
+    }
+}
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    Point p = Point(10, 20);
+    printf("%i\n", p.sum());
+    printf("%i\n", add(1, 2));
+    return 0;
+}

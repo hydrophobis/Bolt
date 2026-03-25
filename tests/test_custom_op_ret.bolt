@@ -1,0 +1,29 @@
+import std.io
+
+struct Point {
+    int x;
+    int y;
+}
+
+operator string Point + Point {
+    return "Point(" + (a.x + b.x) + ", " + (a.y + b.y) + ")";
+}
+
+operator int Point == Point {
+    return a.x == b.x && a.y == b.y;
+}
+
+int main() {
+    Point p1; p1.x = 10; p1.y = 20;
+    Point p2; p2.x = 5; p2.y = 5;
+    
+    // Test operator returning string
+    printf("p1 + p2 = %s\n", p1 + p2);
+    
+    // Test operator returning int (bool) - utilizing the standard comparison return type for verify
+    if (p1 == p1) {
+        printf("p1 == p1\n");
+    }
+    
+    return 0;
+}

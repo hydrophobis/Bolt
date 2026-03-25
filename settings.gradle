@@ -1,0 +1,15 @@
+/*
+ * Bootstrapped via `gradle init`, then tweaked for this repo.
+ *
+ * The settings file lists the projects included in the build.
+ * See https://docs.gradle.org/9.2.1/userguide/multi_project_builds.html for details.
+ * This project uses @Incubating APIs which are subject to change.
+ */
+
+plugins {
+    // Apply the foojay-resolver plugin to allow automatic download of JDKs
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'Bolt'
+include('app')
