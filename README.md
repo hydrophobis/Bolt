@@ -1,6 +1,8 @@
 ## Bolt
 C++ abstractions without the debt. A C superset with various abstractions from C++ and Java which transpiles into C.
 
+Note: Bolt is very much in beta, expect bugs
+
 ### Compat, building, etc
 Only tested on Windows, i see no reason it wouldnt work on Linux/MacOS
 
