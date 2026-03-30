@@ -181,6 +181,70 @@ public class Codegen extends AbstractASTVisitor<String> {
         return finalBuilder.toString();
     }
 
+    public String generateHeader() {
+        currentScope = symbols;
+        builder.setLength(0);
+        genericBuilder.setLength(0);
+        generatedInstantiations.clear();
+
+        for (ASTNode node : tree) {
+            if (node instanceof PackageDeclaration pkg) {
+                currentPackage = pkg.name;
+                break;
+            }
+        }
+
+        String guard = "BOLT_HEADER_" + (currentPackage != null ? currentPackage.replace('.', '_').toUpperCase() : "ROOT") + "_H";
+        builder.append("#ifndef ").append(guard).append("\n");
+        builder.append("#define ").append(guard).append("\n\n");
+
+        for (ASTNode node : tree) {
+            if (node instanceof ImportDeclaration imp) {
+                String path = imp.path;
+                if (path.equals("std.io")) {
+                    builder.append("#include <stdio.h>\n");
+                } else if (path.equals("std.stdlib")) {
+                    builder.append("#include <stdlib.h>\n");
+                } else if (path.equals("std.math")) {
+                    builder.append("#include <math.h>\n");
+                } else if (path.equals("std.string")) {
+                    builder.append("#include <string.h>\n");
+                } else if (path.equals("std.time")) {
+                    builder.append("#include <time.h>\n");
+                } else {
+                    builder.append("#include \"").append(path.replace(".", "/")).append(".h\"\n");
+                }
+            }
+        }
+
+        if (!tree.isEmpty()) {
+            builder.append("\n");
+        }
+
+        for (String name : symbols.keySet()) {
+            Symbol sym = symbols.get(name);
+            if (sym.kind == Symbol.Kind.CLASS || sym.kind == Symbol.Kind.STRUCT) {
+                String cName = toCName(name);
+                builder.append("typedef struct ").append(cName).append(" ").append(cName).append(";\n");
+            }
+        }
+
+        builder.append("\n");
+
+        for (ASTNode node : tree) {
+            if (node instanceof ClassDeclaration cls) {
+                generateStructDefinition(cls);
+            }
+        }
+
+        builder.append("\n");
+
+        generateForwardDeclarations();
+
+        builder.append("\n#endif // ").append(guard).append("\n");
+        return builder.toString();
+    }
+
     private void generateForwardDeclarations() {
         for (ASTNode node : tree) {
             if (node instanceof FunctionDeclaration func && func.genericParams.isEmpty()) {
@@ -1307,7 +1371,12 @@ public String visitExpressionStatement(ExpressionStatement node) {
             } else if (mangle) {
                 builder.append(mangleIdentifier(id.name, argTypes, null));
             } else {
-                builder.append(mangleGlobalName(id.name));
+                boolean hasNonStdImport = imports.stream().anyMatch(imp -> !imp.startsWith("std."));
+                if (sym == null && hasNonStdImport) {
+                    builder.append(id.name);
+                } else {
+                    builder.append(mangleGlobalName(id.name));
+                }
             }
             
             if (!config.getBoolean("allow-recursion") && id.name.equals(currentFunctionName)) {

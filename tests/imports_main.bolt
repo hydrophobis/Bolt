@@ -1,0 +1,9 @@
+package test.test;
+
+import imports.helper
+import std.io
+
+int main() {
+    printf("%d\n", add(19, 23));
+    return 0;
+}

@@ -24,16 +24,58 @@ for bolt_file in tests/*.bolt; do
     [ -e "$bolt_file" ] || continue
 
     base=$(basename "$bolt_file" .bolt)
+    pkg=$(grep -E '^package ' "$bolt_file" | awk '{print $2}' | sed 's/;//')
+    if [ -n "$pkg" ]; then
+        pkgdir=${pkg//./\/}
+    else
+        pkgdir="$base"
+    fi
+
     expected_file="tests/$base.out"
-    output_c="tests/build/$base/$base.c"
-    output_bin="tests/build/$base/$base"
-    actual_out="tests/build/$base/$base.actual"
+    output_dir="tests/build/$pkgdir"
+    output_c="$output_dir/$base.c"
+    output_bin="$output_dir/$base"
+    actual_out="$output_dir/$base.actual"
 
     ((TOTAL++))
 
-    mkdir -p "tests/build/$base"
+    mkdir -p "$output_dir"
 
     printf "Test %-20s: " "$base"
+
+    dependency_objects=""
+
+    # import handling
+    for imp in $(grep -E '^import ' "$bolt_file" | sed 's/;.*//' | awk '{print $2}'); do
+        if [[ "$imp" == std.* ]]; then
+            continue
+        fi
+
+        dep_path=${imp//./\/}
+        dep_bolt="tests/$dep_path.bolt"
+
+        if [ -f "$dep_bolt" ]; then
+            dep_output="tests/build/$dep_path.c"
+            dep_output_dir=$(dirname "$dep_output")
+            mkdir -p "$dep_output_dir"
+
+            ./gradlew :app:run --quiet --args="../$dep_bolt ../$dep_output" > "$output_dir/${base}_import_${dep_path//\//_}.log" 2>&1
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}FAILED (Import Transpilation: $dep_bolt)${NC}"
+                echo "  See $output_dir/${base}_import_${dep_path//\//_}.log for details"
+                continue 2
+            fi
+
+            dep_obj="${dep_output%.c}.o"
+            clang -I tests/build "$dep_output" -c -o "$dep_obj" > "$output_dir/${base}_import_${dep_path//\//_}_compile.log" 2>&1
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}FAILED (Import C Compilation: $dep_output)${NC}"
+                echo "  See $output_dir/${base}_import_${dep_path//\//_}_compile.log for details"
+                continue 2
+            fi
+            dependency_objects="$dependency_objects $dep_obj"
+        fi
+    done
 
     # 1. Transpile using Gradle (specifying :app:run to execute from root)
     # Output logs to build dir to keep output clean
@@ -45,7 +87,7 @@ for bolt_file in tests/*.bolt; do
     fi
 
     # 2. Compile C
-    clang "$output_c" -o "$output_bin" > "tests/build/${base}/${base}_compile.log" 2>&1
+    clang -I tests/build "$output_c" $dependency_objects -o "$output_bin" > "$output_dir/${base}_compile.log" 2>&1
     if [ $? -ne 0 ]; then
         echo -e "${RED}FAILED (C Compilation)${NC}"
         echo "  See tests/build/${base}/${base}_compile.log for details"

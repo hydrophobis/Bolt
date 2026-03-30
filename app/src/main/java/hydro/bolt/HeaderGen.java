@@ -1,28 +1,27 @@
 package hydro.bolt;
 
-import hydro.bolt.parser.*;
-
-import java.io.IOException;
-import java.util.List;
-
 import hydro.bolt.ast.*;
+import hydro.bolt.ast.bolt.ImportDeclaration;
 import hydro.bolt.ast.bolt.PackageDeclaration;
+import hydro.bolt.parser.*;
 import hydro.bolt.tokens.*;
 
 import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.List;
 
-public class Bolt {
+public class HeaderGen {
 
     public static void main(String[] args) throws IOException {
         if (args.length == 0 || args[0].equals("-h") || args[0].equals("--help")) {
-            System.out.println("Bolt Compiler");
-            System.out.println("Usage: bolt <input.bolt> [output.c] [options]");
-            System.out.println("\nOptions:");
-            System.out.println("  -h, --help            Show this help message");
-            System.out.println("  --<key>=<value>      Override configuration setting");
-            System.out.println("  --<flag>             Set boolean configuration setting to true");
+            System.out.println("Bolt Header Generator");
+            System.out.println("Usage: headergen <input.bolt> [output.h] [--<key>=<value>] [--<flag>]");
+            System.out.println("```");
+            System.out.println("bolt-headergen mylib/helpers.bolt mylib/helpers.h");
+            System.out.println("```");
+            System.out.println("Options are the same as bolt: e.g. --mangle=false");
             return;
         }
 
@@ -56,18 +55,12 @@ public class Bolt {
             System.exit(1);
         }
 
-        if (config.getBoolean("verbose")) {
-            System.out.println("Bolt Compiler - Configuration:");
-            for (String key : new String[]{"mangle", "mangle-prefix", "indent-size", "brace-style", "allow-recursion"}) {
-                System.out.println("  " + key + ": " + config.get(key));
-            }
-        }
-
+        // determine package directory
         String code = Files.readString(Paths.get(inputFile));
         ErrorReporter reporter = new ErrorReporter();
         Tokenizer tokenizer = new Tokenizer(code, reporter);
         List<Token> tokens = tokenizer.tokenize();
-        
+
         Parser parser = new Parser(tokens, config);
         parser.reporter = reporter;
         ASTTree ast = parser.parse();
@@ -77,7 +70,6 @@ public class Bolt {
             System.exit(1);
         }
 
-        // package path for output placement
         String packageName = null;
         for (ASTNode node : ast) {
             if (node instanceof PackageDeclaration pkg) {
@@ -85,7 +77,6 @@ public class Bolt {
                 break;
             }
         }
-
         String packageDir = "";
         if (packageName != null && !packageName.isEmpty()) {
             packageDir = packageName.replace('.', '/');
@@ -97,9 +88,9 @@ public class Bolt {
                 baseName = baseName.substring(0, baseName.length() - 5);
             }
             if (!packageDir.isEmpty()) {
-                outputFile = packageDir + "/" + baseName + ".c";
+                outputFile = packageDir + "/" + baseName + ".h";
             } else {
-                outputFile = baseName + ".c";
+                outputFile = baseName + ".h";
             }
         } else if (!packageDir.isEmpty()) {
             java.nio.file.Path explicitPath = Paths.get(outputFile);
@@ -118,12 +109,14 @@ public class Bolt {
         generator.symbols = parser.symbols;
         generator.imports = parser.imports;
         generator.reporter = reporter;
-        String generatedCode = "";
+
+        String generatedHeader;
         try {
-            generatedCode = generator.generate();
+            generatedHeader = generator.generateHeader();
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(1);
+            return;
         }
 
         if (reporter.hasErrors()) {
@@ -131,37 +124,10 @@ public class Bolt {
             System.exit(1);
         }
 
-        if (outputFile != null) {
-            try (FileWriter writer = new FileWriter(outputFile)) {
-                writer.write(generatedCode);
-            }
-            System.out.println("Transpilation successful. Output written to " + outputFile);
-
-            String headerFile;
-            if (outputFile.endsWith(".c")) {
-                headerFile = outputFile.substring(0, outputFile.length() - 2) + ".h";
-            } else {
-                headerFile = outputFile + ".h";
-            }
-
-            java.nio.file.Path headerPath = Paths.get(headerFile);
-            if (headerPath.getParent() != null) {
-                Files.createDirectories(headerPath.getParent());
-            }
-
-            try {
-                String headerCode = generator.generateHeader();
-                try (FileWriter headerWriter = new FileWriter(headerFile)) {
-                    headerWriter.write(headerCode);
-                }
-                System.out.println("Header generation successful. Output written to " + headerFile);
-            } catch (Exception e) {
-                System.err.println("Warning: failed to generate header: " + e.getMessage());
-                e.printStackTrace();
-                System.exit(1);
-            }
-        } else {
-            System.out.println(generatedCode);
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            writer.write(generatedHeader);
         }
+
+        System.out.println("Header generation successful. Output written to " + outputFile);
     }
 }
