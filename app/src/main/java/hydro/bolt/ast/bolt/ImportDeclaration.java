@@ -4,6 +4,8 @@ import hydro.bolt.ast.*;
 
 public class ImportDeclaration extends ASTNode {
     public final String path;
+    public boolean isCHeader = false;
+    public String cHeaderName = null;
 
     public ImportDeclaration(String path) {
         this.path = path;

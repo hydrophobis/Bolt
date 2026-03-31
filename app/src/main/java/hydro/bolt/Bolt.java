@@ -103,7 +103,8 @@ public class Bolt {
             }
         } else if (!packageDir.isEmpty()) {
             java.nio.file.Path explicitPath = Paths.get(outputFile);
-            if (explicitPath.getParent() == null || !explicitPath.toString().contains(packageDir + "/")) {
+            String explicitPathNormalized = explicitPath.toString().replace('\\', '/');
+            if (explicitPath.getParent() == null || !explicitPathNormalized.contains(packageDir + "/")) {
                 outputFile = packageDir + "/" + explicitPath.getFileName().toString();
             }
         }

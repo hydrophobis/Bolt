@@ -15,6 +15,7 @@ import hydro.bolt.ast.misc.MemberAccess;
 import hydro.bolt.ast.misc.Parameter;
 import hydro.bolt.ast.statement.*;
 import hydro.bolt.ast.bolt.*;
+import hydro.bolt.ast.Visibility;
 
 // warcrime of a parser
 public class Parser {
@@ -40,10 +41,14 @@ public class Parser {
         while (!isAtEnd()) {
             try {
                 ASTNode node = parseDeclaration();
+                while (!pendingNodes.isEmpty()) {
+                    ast.add(pendingNodes.remove(0));
+                }
                 if (node != null) {
                     ast.add(node);
                 }
             } catch (ParseError e) {
+                pendingNodes.clear();
                 synchronize();
             }
         }
@@ -95,6 +100,51 @@ public class Parser {
         if (matchKeyword("struct")) return parseClass();
         if (matchKeyword("impl")) return parseImpl();
 
+        // Visibility block: public { ... } / private { ... }
+        if (checkKeyword("public") || checkKeyword("private")) {
+            Token visToken = peek();
+            Visibility vis = visToken.lexeme.equals("public") ? Visibility.PUBLIC : Visibility.PRIVATE;
+            if (peekNext() != null && peekNext().type == TokenType.LBRACE) {
+                consume();
+                consume(TokenType.LBRACE);
+                List<ASTNode> visNodes = new ArrayList<>();
+                while (!check(TokenType.RBRACE) && !isAtEnd()) {
+                    ASTNode decl = parseDeclaration();
+                    if (decl != null) {
+                        setVisibility(decl, vis);
+                        visNodes.add(decl);
+                    }
+                }
+                consume(TokenType.RBRACE);
+                pendingNodes.addAll(visNodes);
+                return null;
+            } else {
+                consume(); // consume public/private
+                List<DecoratorNode> decorators = parseDecorators();
+                ASTNode node = parseTopLevelWithoutVisibility();
+                if (node != null) {
+                    node.decorators.addAll(decorators);
+                    setVisibility(node, vis);
+                }
+                return node;
+            }
+        }
+
+        return parseTopLevelWithoutVisibility();
+    }
+
+    private List<ASTNode> pendingNodes = new ArrayList<>();
+
+    /** Apply visibility to a node if it supports it. */
+    private void setVisibility(ASTNode node, Visibility vis) {
+        if (node instanceof FunctionDeclaration func) {
+            func.visibility = vis;
+        } else if (node instanceof VariableDeclaration var) {
+            var.visibility = vis;
+        }
+    }
+
+    private ASTNode parseTopLevelWithoutVisibility() {
         if (isTypeStart(peek()) || check(TokenType.LPAREN)) {
             int saved = position;
             
@@ -776,6 +826,20 @@ public class Parser {
     }
 
     private ImportDeclaration parseImport() {
+        if (check(TokenType.LESS)) {
+            Token lt = consume(TokenType.LESS);
+            StringBuilder header = new StringBuilder();
+            while (!check(TokenType.GREATER) && !isAtEnd()) {
+                header.append(consume().lexeme);
+            }
+            consume(TokenType.GREATER);
+            if (check(TokenType.SEMICOLON)) consume(TokenType.SEMICOLON);
+            ImportDeclaration imp = new ImportDeclaration("");
+            imp.isCHeader = true;
+            imp.cHeaderName = header.toString();
+            return imp;
+        }
+
         StringBuilder path = new StringBuilder();
         Token first = consume(TokenType.IDENTIFIER);
         path.append(first.lexeme);
@@ -817,8 +881,39 @@ public class Parser {
         consume(TokenType.LBRACE);
         ASTTree members = new ASTTree();
         while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            if (checkKeyword("public") || checkKeyword("private")) {
+                Token visToken = peek();
+                Visibility vis = visToken.lexeme.equals("public") ? Visibility.PUBLIC : Visibility.PRIVATE;
+                if (peekNext() != null && peekNext().type == TokenType.LBRACE) {
+                    // block form: public { ... } / private { ... }
+                    consume();
+                    consume(TokenType.LBRACE);
+                    while (!check(TokenType.RBRACE) && !isAtEnd()) {
+                        ASTNode decl = parseDeclaration();
+                        if (decl != null) {
+                            setVisibility(decl, vis);
+                            members.add(decl);
+                        }
+                    }
+                    consume(TokenType.RBRACE);
+                    continue;
+                } else {
+                    // prefix form: public void foo() ...
+                    consume();
+                    List<DecoratorNode> decorators = parseDecorators();
+                    ASTNode decl = parseDeclaration();
+                    if (decl != null) {
+                        decl.decorators.addAll(0, decorators);
+                        setVisibility(decl, vis);
+                        members.add(decl);
+                    }
+                    continue;
+                }
+            }
             ASTNode node = parseDeclaration();
             if (node != null) {
+                // Default to PRIVATE for class members when no keyword given
+                setVisibility(node, Visibility.PRIVATE);
                 members.add(node);
             }
         }

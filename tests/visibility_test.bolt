@@ -1,0 +1,11 @@
+class Foo {
+    private int secret;
+    public int value;
+    public int get() { return self.value; }
+    private int internal() { return self.secret; }
+}
+
+int main() {
+    Foo f;
+    return 0;
+}

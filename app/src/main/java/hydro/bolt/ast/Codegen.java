@@ -18,6 +18,9 @@ import hydro.bolt.ast.decl.*;
 import hydro.bolt.ast.type.*;
 import hydro.bolt.ast.expr.*;
 import hydro.bolt.ast.statement.*;
+import hydro.bolt.ast.Visibility;
+import hydro.bolt.ast.expr.*;
+import hydro.bolt.ast.statement.*;
 import hydro.bolt.Config;
 import hydro.bolt.parser.Parser;
 import hydro.bolt.parser.Symbol;
@@ -200,6 +203,11 @@ public class Codegen extends AbstractASTVisitor<String> {
 
         for (ASTNode node : tree) {
             if (node instanceof ImportDeclaration imp) {
+                // Angle-bracket C header: import <stdio.h>
+                if (imp.isCHeader) {
+                    builder.append("#include <").append(imp.cHeaderName).append(">\n");
+                    continue;
+                }
                 String path = imp.path;
                 if (path.equals("std.io")) {
                     builder.append("#include <stdio.h>\n");
@@ -248,6 +256,7 @@ public class Codegen extends AbstractASTVisitor<String> {
     private void generateForwardDeclarations() {
         for (ASTNode node : tree) {
             if (node instanceof FunctionDeclaration func && func.genericParams.isEmpty()) {
+                if (func.visibility == Visibility.PRIVATE) continue;
                 generateSignature(func, null, false);
                 builder.append(";\n");
             } else if (node instanceof ClassDeclaration cls && cls.genericParams.isEmpty()) {
@@ -255,6 +264,8 @@ public class Codegen extends AbstractASTVisitor<String> {
                 if (cls.inner != null) {
                     for (ASTNode member : cls.inner) {
                         if (member instanceof FunctionDeclaration func) {
+                            // Skip private methods
+                            if (func.visibility == Visibility.PRIVATE) continue;
                             generateSignature(func, fullClassName, true);
                             builder.append(";\n");
                         }
@@ -704,6 +715,9 @@ public class Codegen extends AbstractASTVisitor<String> {
                 if (member instanceof VariableDeclaration field) {
                     StringBuilder oldBuilder = builder;
                     builder = new StringBuilder();
+                    if (field.visibility == Visibility.PRIVATE) {
+                        builder.append("/* private */ ");
+                    }
                     field.type.accept(this);
                     String typeStr = builder.toString();
 
@@ -1003,7 +1017,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
                 for (ASTNode arg : node.arguments) argTypes.add(resolveType(arg));
             }
             String methodName = mangleIdentifier("init", argTypes, fullTypeName);
-            builder.append(methodName).append("(*(").append(cTypeName).append("*)malloc(sizeof(").append(cTypeName).append("))");
+            builder.append(methodName).append("((").append(cTypeName).append("*)calloc(1, sizeof(").append(cTypeName).append("))");
             if (node.arguments != null && !node.arguments.isEmpty()) {
                 builder.append(", ");
                 for (int i = 0; i < node.arguments.size(); i++) {
@@ -1013,7 +1027,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
             }
             builder.append(")");
         } else {
-            builder.append("(*(").append(cTypeName).append("*)malloc(sizeof(").append(cTypeName).append(")))");
+            builder.append("((").append(cTypeName).append("*)calloc(1, sizeof(").append(cTypeName).append(")))");
         }
         return null;
     }
@@ -1050,6 +1064,10 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
     @Override
     public String visit(ImportDeclaration node) {
+        if (node.isCHeader) {
+            builder.append("#include <").append(node.cHeaderName).append(">\n");
+            return null;
+        }
         String path = node.path;
         if (path.equals("std.io")) {
             builder.append("#include <stdio.h>\n");

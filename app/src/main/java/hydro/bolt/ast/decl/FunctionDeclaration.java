@@ -2,6 +2,7 @@ package hydro.bolt.ast.decl;
 
 import hydro.bolt.ast.ASTNode;
 import hydro.bolt.ast.ASTVisitor;
+import hydro.bolt.ast.Visibility;
 import hydro.bolt.ast.misc.Parameter;
 
 /**
@@ -14,6 +15,7 @@ public class FunctionDeclaration extends ASTNode {
     public ASTNode body;
     public boolean isExtern;
     public java.util.List<String> genericParams = new java.util.ArrayList<>();
+    public Visibility visibility = Visibility.PUBLIC;
 
     public FunctionDeclaration(ASTNode returnType, String name, java.util.List<Parameter> parameters, ASTNode body, boolean isExtern, int line, int column) {
         super(line, column);

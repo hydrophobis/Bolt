@@ -31,16 +31,16 @@ I use MS Java 21.0.9 for building and running
 
 #### Classes
 
-Classes group fields and methods together. Methods receive an implicit `self` pointer. Use `new` to heap-allocate and `delete` to free.
+Classes group fields and methods together. Methods receive an implicit `self` pointer. Use `new` to heap-allocate and `delete` to free. Class methods are private by default, and fields are private by default.
 
 ```cpp
 import stdio;
 
 class Vec2 {
-    int x;
-    int y;
+    public int x;
+    public int y;
 
-    void print() {
+    public void print() {
         printf("(%d, %d)\n", self.x, self.y);
     }
 }
@@ -80,13 +80,13 @@ import stdio;
 import stdlib;
 
 class Buffer {
-    int* data;
+    public int* data;
 
-    Buffer init(int size) {
+    public Buffer init(int size) {
         self.data = (int*)malloc(size * sizeof(int));
     }
 
-    void dinit() {
+    public void dinit() {
         free(self.data);
     }
 }
@@ -107,12 +107,12 @@ Add methods to a type outside its original declaration - useful for separating i
 import stdio;
 
 class Point {
-    int x;
-    int y;
+    public int x;
+    public int y;
 }
 
 impl Point {
-    void print() {
+    public void print() {
         printf("Point(%d, %d)\n", self.x, self.y);
     }
 }
@@ -136,8 +136,8 @@ Classes and functions can be parameterized with type arguments. Bolt treats thes
 import stdio;
 
 class Pair<A, B> {
-    A first;
-    B second;
+    public A first;
+    public B second;
 }
 
 int main() {
@@ -152,7 +152,7 @@ int main() {
 Generic functions work the same way:
 
 ```cpp
-void swap<T>(T* a, T* b) {
+public void swap<T>(T* a, T* b) {
     T tmp = *a;
     *a = *b;
     *b = tmp;
@@ -174,8 +174,8 @@ Define custom behavior for operators on your types. Unary form: `operator Return
 import stdio;
 
 class Vec2 {
-    int x;
-    int y;
+    public int x;
+    public int y;
 }
 
 operator Vec2 Vec2 + Vec2 {
@@ -290,6 +290,9 @@ no-heap=false
 
 # Emit source traceability comments in generated C (default: false)
 traceability=true
+
+# Enable operator overloading (default: false)
+operator-overloading=false
 
 # Target C standard (default: c99)
 c-standard=c99
