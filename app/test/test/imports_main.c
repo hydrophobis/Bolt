@@ -6,8 +6,10 @@
 
 static char* __bolt_string_copy(const char* s) {
     if (!s) return NULL;
-    char* res = (char*)malloc(strlen(s) + 1);
-    if (res) strcpy(res, s); return res;
+    size_t len = strlen(s);
+    char* res = (char*)malloc(len + 1);
+    if (res) { memcpy(res, s, len); res[len] = '\0'; }
+    return res;
 }
 
 static void __bolt_string_assign(char** dest, const char* src) {
@@ -18,37 +20,39 @@ static void __bolt_string_assign(char** dest, const char* src) {
 
 static char* __bolt_string_concat(const char* a, const char* b) {
     if (!a) a = ""; if (!b) b = "";
-    int len = strlen(a) + strlen(b);
-    char* res = (char*)malloc(len + 1);
-    if (res) { strcpy(res, a); strcat(res, b); }
+    size_t len_a = strlen(a);
+    size_t len_b = strlen(b);
+    char* res = (char*)malloc(len_a + len_b + 1);
+    if (res) { memcpy(res, a, len_a); memcpy(res + len_a, b, len_b); res[len_a + len_b] = '\0'; }
     return res;
 }
 
 static char* __bolt_concat_int_str(int i, const char* s) {
     if (!s) s = "";
     char buf[65536];
-    sprintf(buf, "%d", i);
-    int len = strlen(buf) + strlen(s);
-    char* res = (char*)malloc(len + 1);
-    if (res) { strcpy(res, buf); strcat(res, s); }
+    int len = snprintf(buf, sizeof(buf), "%d", i);
+    size_t len_s = strlen(s);
+    char* res = (char*)malloc(len + len_s + 1);
+    if (res) { memcpy(res, buf, len); memcpy(res + len, s, len_s); res[len + len_s] = '\0'; }
     return res;
 }
 
 static char* __bolt_concat_str_int(const char* s, int i) {
     if (!s) s = "";
     char buf[65536];
-    sprintf(buf, "%d", i);
-    int len = strlen(s) + strlen(buf);
-    char* res = (char*)malloc(len + 1);
-    if (res) { strcpy(res, s); strcat(res, buf); }
+    int len = snprintf(buf, sizeof(buf), "%d", i);
+    size_t len_s = strlen(s);
+    char* res = (char*)malloc(len_s + len + 1);
+    if (res) { memcpy(res, s, len_s); memcpy(res + len_s, buf, len); res[len_s + len] = '\0'; }
     return res;
 }
 
 static char* __bolt_string_concat_n(int n, ...) {
     va_list args;
     va_start(args, n);
-    int total_len = 0;
+    size_t total_len = 0;
     const char** strs = (const char**)malloc(n * sizeof(char*));
+    if (!strs) { va_end(args); return NULL; }
     for (int i = 0; i < n; i++) {
         strs[i] = va_arg(args, const char*);
         if (strs[i]) total_len += strlen(strs[i]);
@@ -56,10 +60,15 @@ static char* __bolt_string_concat_n(int n, ...) {
     va_end(args);
     char* res = (char*)malloc(total_len + 1);
     if (res) {
-        res[0] = '\0';
+        char* p = res;
         for (int i = 0; i < n; i++) {
-            if (strs[i]) strcat(res, strs[i]);
+            if (strs[i]) {
+                size_t len = strlen(strs[i]);
+                memcpy(p, strs[i], len);
+                p += len;
+            }
         }
+        *p = '\0';
     }
     free(strs);
     return res;

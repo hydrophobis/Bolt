@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "hydro",
   "repository": { "type": "git", "url": "https://github.com/hydro/bolt" },
+  "icon": "icon.png",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],
   "activationEvents": ["onLanguage:bolt"],
@@ -15,6 +16,10 @@
         "id": "bolt",
         "aliases": ["Bolt", "bolt"],
         "extensions": [".bolt"],
+        "icon": {
+          "light": "icon.png",
+          "dark": "icon.png"
+        },
         "configuration": "./language-configuration.json"
       }
     ],

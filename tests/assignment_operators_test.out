@@ -1,0 +1,6 @@
+Modulo assignment: 10 % 3 = 1
+Bitwise AND assignment: 12 & 7 = 4
+Bitwise OR assignment: 5 | 3 = 7
+Bitwise XOR assignment: 5 ^ 3 = 6
+Left shift assignment: 2 << 2 = 8
+Right shift assignment: 16 >> 2 = 4

@@ -4,7 +4,6 @@ import hydro.bolt.ast.ASTNode;
 import hydro.bolt.ast.ASTVisitor;
 import hydro.bolt.ast.RawCNode;
 import hydro.bolt.ast.misc.Identifier;
-import hydro.bolt.tokens.TokenType;
 
 public class BinaryOverloadNode extends OverloadNode {
     public Identifier returnType;

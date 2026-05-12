@@ -1,0 +1,20 @@
+import stdio;
+
+int main() {
+    // Test hex literals
+    int hex1 = 0xFF;
+    int hex2 = 0x10;
+    printf("Hex: 0xFF = %d, 0x10 = %d\n", hex1, hex2);
+
+    // Test octal literals
+    int oct1 = 0o77;
+    int oct2 = 0o10;
+    printf("Octal: 0o77 = %d, 0o10 = %d\n", oct1, oct2);
+
+    // Test binary literals
+    int bin1 = 0b1010;
+    int bin2 = 0b1111;
+    printf("Binary: 0b1010 = %d, 0b1111 = %d\n", bin1, bin2);
+
+    return 0;
+}

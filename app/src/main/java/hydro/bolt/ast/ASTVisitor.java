@@ -10,6 +10,7 @@ import hydro.bolt.ast.bolt.*;
 // some nodes have their own visit methods, some dont and should just be overloaded of visit
 public interface ASTVisitor<T> {
     T visitClassDeclaration(ClassDeclaration node);
+    T visitInterfaceDeclaration(InterfaceDeclaration node);
 
     T visit(ImportDeclaration node);
 
@@ -122,4 +123,6 @@ public interface ASTVisitor<T> {
 
     T visitUnaryOverload(UnaryOverloadNode overload);
     T visitBinaryOverload(BinaryOverloadNode overload);
+
+    T visitLambdaExpression(LambdaExpression lambda);
 }

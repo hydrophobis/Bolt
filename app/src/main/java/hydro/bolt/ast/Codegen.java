@@ -11,22 +11,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import hydro.bolt.ast.bolt.*;
 import hydro.bolt.ast.decl.*;
 import hydro.bolt.ast.type.*;
 import hydro.bolt.ast.expr.*;
 import hydro.bolt.ast.statement.*;
-import hydro.bolt.ast.Visibility;
-import hydro.bolt.ast.expr.*;
-import hydro.bolt.ast.statement.*;
 import hydro.bolt.Config;
-import hydro.bolt.parser.Parser;
 import hydro.bolt.parser.Symbol;
 import hydro.bolt.parser.SymbolTree;
 import hydro.bolt.template.Template;
-import hydro.bolt.tokens.Tokenizer;
 
 // almost 1800 lines of sadness and barely functional code generation
 // Almost no comments either because Im lazy so good luck me
@@ -53,10 +47,20 @@ public class Codegen extends AbstractASTVisitor<String> {
     private int indentLevel = 0;
     private String currentFunctionName = null;
     private int recursionDepth = 0;
+    private List<LambdaExpression> lambdaFunctions = new ArrayList<>();
+    private Map<String, String> lambdaSignatures = new HashMap<>();
+    private String cachedIndent = "";
 
     public String generate() {
         currentScope = symbols;
         builder.setLength(0);
+        lambdaFunctions.clear();
+        lambdaSignatures.clear();
+
+        // First pass: collect lambda functions
+        for (ASTNode node : tree) {
+            collectLambdas(node);
+        }
 
         for (ASTNode node : tree) {
             if (node instanceof ClassDeclaration cls) {
@@ -92,8 +96,10 @@ public class Codegen extends AbstractASTVisitor<String> {
         if (!config.getBoolean("no-string-helpers")) {
             builder.append("static char* __bolt_string_copy(const char* s) {\n");
             builder.append("    if (!s) return NULL;\n");
-            builder.append("    char* res = (char*)malloc(strlen(s) + 1);\n");
-            builder.append("    if (res) strcpy(res, s); return res;\n");
+            builder.append("    size_t len = strlen(s);\n");
+            builder.append("    char* res = (char*)malloc(len + 1);\n");
+            builder.append("    if (res) { memcpy(res, s, len); res[len] = '\\0'; }\n");
+            builder.append("    return res;\n");
             builder.append("}\n\n");
 
             builder.append("static void __bolt_string_assign(char** dest, const char* src) {\n");
@@ -104,37 +110,39 @@ public class Codegen extends AbstractASTVisitor<String> {
 
             builder.append("static char* __bolt_string_concat(const char* a, const char* b) {\n");
             builder.append("    if (!a) a = \"\"; if (!b) b = \"\";\n");
-            builder.append("    int len = strlen(a) + strlen(b);\n");
-            builder.append("    char* res = (char*)malloc(len + 1);\n");
-            builder.append("    if (res) { strcpy(res, a); strcat(res, b); }\n");
+            builder.append("    size_t len_a = strlen(a);\n");
+            builder.append("    size_t len_b = strlen(b);\n");
+            builder.append("    char* res = (char*)malloc(len_a + len_b + 1);\n");
+            builder.append("    if (res) { memcpy(res, a, len_a); memcpy(res + len_a, b, len_b); res[len_a + len_b] = '\\0'; }\n");
             builder.append("    return res;\n");
             builder.append("}\n\n");
 
             builder.append("static char* __bolt_concat_int_str(int i, const char* s) {\n");
             builder.append("    if (!s) s = \"\";\n");
             builder.append("    char buf[").append(config.get("string-buffer-size")).append("];\n");
-            builder.append("    sprintf(buf, \"%d\", i);\n");
-            builder.append("    int len = strlen(buf) + strlen(s);\n");
-            builder.append("    char* res = (char*)malloc(len + 1);\n");
-            builder.append("    if (res) { strcpy(res, buf); strcat(res, s); }\n");
+            builder.append("    int len = snprintf(buf, sizeof(buf), \"%d\", i);\n");
+            builder.append("    size_t len_s = strlen(s);\n");
+            builder.append("    char* res = (char*)malloc(len + len_s + 1);\n");
+            builder.append("    if (res) { memcpy(res, buf, len); memcpy(res + len, s, len_s); res[len + len_s] = '\\0'; }\n");
             builder.append("    return res;\n");
             builder.append("}\n\n");
 
             builder.append("static char* __bolt_concat_str_int(const char* s, int i) {\n");
             builder.append("    if (!s) s = \"\";\n");
             builder.append("    char buf[").append(config.get("string-buffer-size")).append("];\n");
-            builder.append("    sprintf(buf, \"%d\", i);\n");
-            builder.append("    int len = strlen(s) + strlen(buf);\n");
-            builder.append("    char* res = (char*)malloc(len + 1);\n");
-            builder.append("    if (res) { strcpy(res, s); strcat(res, buf); }\n");
+            builder.append("    int len = snprintf(buf, sizeof(buf), \"%d\", i);\n");
+            builder.append("    size_t len_s = strlen(s);\n");
+            builder.append("    char* res = (char*)malloc(len_s + len + 1);\n");
+            builder.append("    if (res) { memcpy(res, s, len_s); memcpy(res + len_s, buf, len); res[len_s + len] = '\\0'; }\n");
             builder.append("    return res;\n");
             builder.append("}\n\n");
 
             builder.append("static char* __bolt_string_concat_n(int n, ...) {\n");
             builder.append("    va_list args;\n");
             builder.append("    va_start(args, n);\n");
-            builder.append("    int total_len = 0;\n");
+            builder.append("    size_t total_len = 0;\n");
             builder.append("    const char** strs = (const char**)malloc(n * sizeof(char*));\n");
+            builder.append("    if (!strs) { va_end(args); return NULL; }\n");
             builder.append("    for (int i = 0; i < n; i++) {\n");
             builder.append("        strs[i] = va_arg(args, const char*);\n");
             builder.append("        if (strs[i]) total_len += strlen(strs[i]);\n");
@@ -142,10 +150,15 @@ public class Codegen extends AbstractASTVisitor<String> {
             builder.append("    va_end(args);\n");
             builder.append("    char* res = (char*)malloc(total_len + 1);\n");
             builder.append("    if (res) {\n");
-            builder.append("        res[0] = '\\0';\n");
+            builder.append("        char* p = res;\n");
             builder.append("        for (int i = 0; i < n; i++) {\n");
-            builder.append("            if (strs[i]) strcat(res, strs[i]);\n");
+            builder.append("            if (strs[i]) {\n");
+            builder.append("                size_t len = strlen(strs[i]);\n");
+            builder.append("                memcpy(p, strs[i], len);\n");
+            builder.append("                p += len;\n");
+            builder.append("            }\n");
             builder.append("        }\n");
+            builder.append("        *p = '\\0';\n");
             builder.append("    }\n");
             builder.append("    free(strs);\n");
             builder.append("    return res;\n");
@@ -155,23 +168,67 @@ public class Codegen extends AbstractASTVisitor<String> {
         generateForwardDeclarations();
 
         for (ASTNode node : tree) {
+            if (node instanceof InterfaceDeclaration inter) {
+                generateInterfaceDefinition(inter);
+            }
             if (node instanceof ClassDeclaration cls) {
                 generateStructDefinition(cls);
             }
         }
         builder.append("\n");
 
-        for (ASTNode node : tree) {            
+        generateClassVTables();
+
+        // Emit lambda forward declarations
+        for (LambdaExpression lambda : lambdaFunctions) {
+            String lambdaName = "__bolt_lambda_" + lambdaFunctions.indexOf(lambda);
+            String sig = lambdaSignatures.get(lambdaName);
+            if (sig != null) {
+                builder.append(sig).append(";\n");
+            }
+        }
+
+        for (ASTNode node : tree) {
             node.accept(this);
+        }
+
+        // Emit lambda functions
+        for (LambdaExpression lambda : lambdaFunctions) {
+            String lambdaName = "__bolt_lambda_" + lambdaFunctions.indexOf(lambda);
+            String sig = lambdaSignatures.get(lambdaName);
+            if (sig != null) {
+                builder.append(sig).append(" {\n");
+                indent();
+
+                // Emit body
+                if (lambda.body instanceof Block block) {
+                    for (ASTNode stmt : block.statements) {
+                        emitIndent();
+                        stmt.accept(this);
+                        if (!(stmt instanceof Block) && !(stmt instanceof IfStatement) &&
+                            !(stmt instanceof WhileStatement) && !(stmt instanceof ForStatement) &&
+                            !(stmt instanceof SwitchStatement)) {
+                            builder.append(";\n");
+                        }
+                    }
+                } else {
+                    emitIndent();
+                    lambda.body.accept(this);
+                    builder.append(";\n");
+                }
+
+                outdent();
+                builder.append("}\n\n");
+            }
         }
 
         StringBuilder finalBuilder = new StringBuilder();
         if (!config.getBoolean("no-std-includes")) {
             int idx = builder.indexOf("#include <string.h>");
             if (idx != -1) {
-                finalBuilder.append(builder.substring(0, idx));
+                finalBuilder.append(builder, 0, idx);
                 finalBuilder.append(genericBuilder);
-                finalBuilder.append(builder.substring(idx));
+                finalBuilder.append(builder, idx, builder.length());
             } else {
                 finalBuilder.append(genericBuilder);
                 finalBuilder.append(builder);
@@ -209,15 +266,16 @@ public class Codegen extends AbstractASTVisitor<String> {
                     continue;
                 }
                 String path = imp.path;
-                if (path.equals("std.io")) {
+
+                if (path.equals("cstd.io")) {
                     builder.append("#include <stdio.h>\n");
-                } else if (path.equals("std.stdlib")) {
+                } else if (path.equals("cstd.stdlib")) {
                     builder.append("#include <stdlib.h>\n");
-                } else if (path.equals("std.math")) {
+                } else if (path.equals("cstd.math")) {
                     builder.append("#include <math.h>\n");
-                } else if (path.equals("std.string")) {
+                } else if (path.equals("cstd.string")) {
                     builder.append("#include <string.h>\n");
-                } else if (path.equals("std.time")) {
+                } else if (path.equals("cstd.time")) {
                     builder.append("#include <time.h>\n");
                 } else {
                     builder.append("#include \"").append(path.replace(".", "/")).append(".h\"\n");
@@ -292,6 +350,10 @@ public class Codegen extends AbstractASTVisitor<String> {
                 builder.append(" __bolt_operator_").append(operatorToName(over.operator)).append("_")
                        .append(toCName(over.operand.name))
                        .append("(").append(toCName(over.operand.name)).append(" a);\n");
+            } else if (node instanceof InterfaceDeclaration inter) {
+                String cName = toCName(inter.name);
+                builder.append("typedef struct ").append(cName).append(" ").append(cName).append(";\n");
+                builder.append("typedef struct ").append(cName).append("_VTable ").append(cName).append("_VTable;\n");
             }
         }
         builder.append("\n");
@@ -366,40 +428,43 @@ public class Codegen extends AbstractASTVisitor<String> {
         builder.append(")");
     }
 
+    private static final Map<String, String> OPERATOR_NAMES = Map.ofEntries(
+        Map.entry("+", "plus"),
+        Map.entry("-", "minus"),
+        Map.entry("*", "mul"),
+        Map.entry("/", "div"),
+        Map.entry("%", "mod"),
+        Map.entry("==", "eq"),
+        Map.entry("!=", "neq"),
+        Map.entry("<", "lt"),
+        Map.entry("<=", "lte"),
+        Map.entry(">", "gt"),
+        Map.entry(">=", "gte"),
+        Map.entry("&&", "land"),
+        Map.entry("||", "lor"),
+        Map.entry("!", "lnot"),
+        Map.entry("&", "band"),
+        Map.entry("|", "bor"),
+        Map.entry("^", "bxor"),
+        Map.entry("~", "bnot"),
+        Map.entry("<<", "shl"),
+        Map.entry(">>", "shr"),
+        Map.entry("[", "lbracket"),
+        Map.entry("]", "rbracket"),
+        Map.entry("(", "lparen"),
+        Map.entry(")", "rparen")
+    );
+
     private String operatorToName(String op) {
-        switch (op) {
-            case "+": return "plus";
-            case "-": return "minus";
-            case "*": return "mul";
-            case "/": return "div";
-            case "%": return "mod";
-            case "==": return "eq";
-            case "!=": return "neq";
-            case "<": return "lt";
-            case "<=": return "lte";
-            case ">": return "gt";
-            case ">=": return "gte";
-            case "&&": return "land";
-            case "||": return "lor";
-            case "!": return "lnot";
-            case "&": return "band";
-            case "|": return "bor";
-            case "^": return "bxor";
-            case "~": return "bnot";
-            case "<<": return "shl";
-            case ">>": return "shr";
-            case "[": return "lbracket";
-            case "]": return "rbracket";
-            case "(": return "lparen";
-            case ")": return "rparen";
-            default:
-                StringBuilder sb = new StringBuilder();
-                for (char c : op.toCharArray()) {
-                    if (Character.isLetterOrDigit(c)) sb.append(c);
-                    else sb.append("_").append((int)c);
-                }
-                return sb.toString();
+        String result = OPERATOR_NAMES.get(op);
+        if (result != null) return result;
+
+        StringBuilder sb = new StringBuilder();
+        for (char c : op.toCharArray()) {
+            if (Character.isLetterOrDigit(c)) sb.append(c);
+            else sb.append("_").append((int)c);
         }
+        return sb.toString();
     }
 
     private String typeName(ASTNode node) {
@@ -427,7 +492,7 @@ public class Codegen extends AbstractASTVisitor<String> {
 
     private String stripGeneric(String type) {
         if (type == null) return null;
-        int angle = type.indexOf("<");
+        int angle = type.indexOf('<');
         if (angle != -1) return type.substring(0, angle);
         return type;
     }
@@ -435,7 +500,10 @@ public class Codegen extends AbstractASTVisitor<String> {
     private String stripPointer(String type) {
         if (type == null) return null;
         String t = stripGeneric(type);
-        return t.endsWith("*") ? t.substring(0, t.length() - 1).trim() : t;
+        if (t.endsWith("*")) {
+            return t.substring(0, t.length() - 1).trim();
+        }
+        return t;
     }
 
     private String resolveType(ASTNode node) {
@@ -556,40 +624,33 @@ public class Codegen extends AbstractASTVisitor<String> {
     }
 
     private void emitIndent() {
-        int size = Integer.parseInt(config.get("indent-size"));
-        String style = config.get("indent-style");
-        String indent = style.equals("tab") ? "\t" : " ";
-        for (int i = 0; i < indentLevel * size; i++) {
-            builder.append(indent);
-        }
+        builder.append(cachedIndent);
     }
 
     private void indent() {
         indentLevel++;
+        updateCachedIndent();
     }
 
     private void outdent() {
         indentLevel--;
         if (indentLevel < 0) indentLevel = 0;
+        updateCachedIndent();
+    }
+
+    private void updateCachedIndent() {
+        int size = Integer.parseInt(config.get("indent-size"));
+        String style = config.get("indent-style");
+        String indentChar = style.equals("tab") ? "\t" : " ";
+        cachedIndent = indentChar.repeat(indentLevel * size);
+    }
+
+    private boolean isStringType(String type) {
+        return "string".equals(type);
     }
 
     private String getBraceStart() {
-        String style = config.get("brace-style");
-        if (style.equalsIgnoreCase("allman")) {
-            return "\n" + getIndentString() + "{";
-        }
-        return " {";
-    }
-
-    private String getIndentString() {
-        int size = Integer.parseInt(config.get("indent-size"));
-        String style = config.get("indent-style");
-        String indent = style.equals("tab") ? "\t" : " ";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < indentLevel * size; i++) {
-            sb.append(indent);
-        }
-        return sb.toString();
+        return config.get("brace-style").equalsIgnoreCase("allman") ? "\n" + cachedIndent + "{" : " {";
     }
 
     private String mangleIdentifier(String name, List<String> paramTypes, String className) {
@@ -623,36 +684,38 @@ public class Codegen extends AbstractASTVisitor<String> {
         return sb.toString();
     }
 
+    private static final Map<String, String> MANGLED_TYPE_NAMES = Map.ofEntries(
+        Map.entry("int", "i"),
+        Map.entry("float", "f"),
+        Map.entry("char", "c"),
+        Map.entry("string", "s"),
+        Map.entry("bool", "b"),
+        Map.entry("void", "v")
+    );
+
     private String getMangledType(String type) {
         if (type == null) return "v";
         type = stripPointer(type);
-        switch (type) {
-            case "int": return "i";
-            case "float": return "f";
-            case "char": return "c";
-            case "string": return "s";
-            case "bool": return "b";
-            case "void": return "v";
-            default:
-                return type.length() + toCName(type);
-        }
+        String result = MANGLED_TYPE_NAMES.get(type);
+        if (result != null) return result;
+        return type.length() + toCName(type);
     }
 
     public String visitRawCNode(RawCNode node) {
         builder.append(node.content);
-        // stupid: if content looks like struct definition but missing semicolon, add it.
+        // if content looks like struct definition but missing semicolon, add it.
         // also handle "struct Point { ... }" where the closing brace might be followed by spaces
         if (node.content.trim().startsWith("struct") && node.content.trim().endsWith("}")) {
              builder.append(";");
         }
-        
+
         // only append newline if its not a short literal like string
         if (node.content.length() > 0 && !Character.isDigit(node.content.charAt(0)) && !node.content.startsWith("\"")) {
             builder.append("\n");
         }
         return null;
     }
-    
+
     // legacy support if visit(RawCNode) was used
     public String visit(RawCNode node) {
         return visitRawCNode(node);
@@ -662,6 +725,40 @@ public class Codegen extends AbstractASTVisitor<String> {
     public String visitClassDeclaration(ClassDeclaration node) {
         if (!node.genericParams.isEmpty()) return null;
         return generateClassMethods(node, node.name);
+    }
+
+    private void generateClassVTables() {
+        for (ASTNode node : tree) {
+            if (node instanceof ClassDeclaration cls && cls.genericParams.isEmpty()) {
+                for (String inter : cls.interfaces) {
+                    generateClassVTableInstance(cls, inter);
+                }
+            }
+        }
+    }
+
+    @Override
+    public String visitInterfaceDeclaration(InterfaceDeclaration node) {
+        return null;
+    }
+
+    private void generateClassVTableInstance(ClassDeclaration node, String interfaceName) {
+        String fullClassName = resolveTypeName(node.name);
+        String fullInterfaceName = resolveTypeName(interfaceName);
+        Symbol interfaceSym = symbols.get(fullInterfaceName);
+        if (interfaceSym == null) return;
+
+        String vtableName = "__bolt_vtable_" + toCName(fullClassName) + "_" + toCName(fullInterfaceName);
+        builder.append("static ").append(toCName(fullInterfaceName)).append("_VTable ").append(vtableName).append(" = {\n");
+        indent();
+        for (String methodName : interfaceSym.members.keySet()) {
+            Symbol methodSym = interfaceSym.members.get(methodName);
+            String mangledName = methodSym.mangle ? mangleIdentifier(methodName, methodSym.parameterTypes, fullClassName) : toCName(fullClassName) + "_" + methodName;
+            emitIndent();
+            builder.append(".").append(methodName).append(" = (void*)").append(mangledName).append(",\n");
+        }
+        outdent();
+        builder.append("};\n\n");
     }
 
     private String generateClassMethods(ClassDeclaration node, String className) {
@@ -743,6 +840,34 @@ public class Codegen extends AbstractASTVisitor<String> {
 
         builder.append(t.apply(data)).append("\n");
         currentGenericParams = oldGenericParams;
+    }
+
+    private void generateInterfaceDefinition(InterfaceDeclaration node) {
+        String cName = toCName(node.name);
+        builder.append("struct ").append(cName).append(" {\n");
+        builder.append("    void* obj;\n");
+        builder.append("    void* vtable;\n");
+        builder.append("};\n\n");
+
+        builder.append("struct ").append(cName).append("_VTable {\n");
+        indent();
+        for (ASTNode member : node.inner) {
+            if (member instanceof FunctionDeclaration func) {
+                emitIndent();
+                func.returnType.accept(this);
+                builder.append(" (*").append(func.name).append(")(void*");
+                if (func.parameters != null && !func.parameters.isEmpty()) {
+                    builder.append(", ");
+                    for (int i = 0; i < func.parameters.size(); i++) {
+                        func.parameters.get(i).type.accept(this);
+                        if (i < func.parameters.size() - 1) builder.append(", ");
+                    }
+                }
+                builder.append(");\n");
+            }
+        }
+        outdent();
+        builder.append("};\n\n");
     }
 
     @Override
@@ -951,7 +1076,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
         if (sym != null) {
             if (sym.isManual) return;
 
-            if (sym.typeName.equals("string")) {
+            if (isStringType(sym.typeName)) {
                 builder.append("if (").append(instanceName).append(") free(").append(instanceName).append(");\n");
                 return;
             }
@@ -1049,7 +1174,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
         Symbol classSym = symbols.get(stripPointer(type));
         if (classSym != null && classSym.members.containsKey("dinit")) {
-            String methodName = true ? toCName(stripPointer(type)) + "_dinit" : "dinit";
+            String methodName = toCName(stripPointer(type)) + "_dinit";
             builder.append("free(").append(methodName).append("((").append(toCName(stripPointer(type))).append("*)");
             node.target.accept(this);
             builder.append("))");
@@ -1062,6 +1187,31 @@ public String visitExpressionStatement(ExpressionStatement node) {
         return null;
     }
 
+    private static final Map<String, String> STD_LIBS = Map.ofEntries(
+        Map.entry("std.io", "stdio.h"),
+        Map.entry("io", "stdio.h"),
+        Map.entry("std.stdlib", "stdlib.h"),
+        Map.entry("stdlib", "stdlib.h"),
+        Map.entry("std.math", "math.h"),
+        Map.entry("math", "math.h"),
+        Map.entry("std.string", "string.h"),
+        Map.entry("string", "string.h"),
+        Map.entry("std.time", "time.h"),
+        Map.entry("time", "time.h"),
+        Map.entry("std.stdarg", "stdarg.h"),
+        Map.entry("stdarg", "stdarg.h"),
+        Map.entry("std.stdbool", "stdbool.h"),
+        Map.entry("stdbool", "stdbool.h"),
+        Map.entry("std.stdint", "stdint.h"),
+        Map.entry("stdint", "stdint.h"),
+        Map.entry("std.ctype", "ctype.h"),
+        Map.entry("ctype", "ctype.h"),
+        Map.entry("std.assert", "assert.h"),
+        Map.entry("assert", "assert.h"),
+        Map.entry("std.stddef", "stddef.h"),
+        Map.entry("stddef", "stddef.h")
+    );
+
     @Override
     public String visit(ImportDeclaration node) {
         if (node.isCHeader) {
@@ -1069,16 +1219,10 @@ public String visitExpressionStatement(ExpressionStatement node) {
             return null;
         }
         String path = node.path;
-        if (path.equals("std.io")) {
-            builder.append("#include <stdio.h>\n");
-        } else if (path.equals("std.stdlib")) {
-            builder.append("#include <stdlib.h>\n");
-        } else if (path.equals("std.math")) {
-            builder.append("#include <math.h>\n");
-        } else if (path.equals("std.string")) {
-            builder.append("#include <string.h>\n");
-        } else if (path.equals("std.time")) {
-            builder.append("#include <time.h>\n");
+
+        String header = STD_LIBS.get(path);
+        if (header != null) {
+            builder.append("#include <").append(header).append(">\n");
         } else {
             builder.append("#include \"").append(path.replace(".", "/")).append(".h\"\n");
         }
@@ -1127,7 +1271,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
     }
 
     private void collectStringAddends(ASTNode node, List<ASTNode> addends) {
-        if (node instanceof BinaryExpression bin && bin.operator.equals("+") && resolveType(bin.left).equals("string") && resolveType(bin.right).equals("string")) {
+        if (node instanceof BinaryExpression bin && bin.operator.equals("+") && isStringType(resolveType(bin.left)) && isStringType(resolveType(bin.right))) {
             collectStringAddends(bin.left, addends);
             collectStringAddends(bin.right, addends);
         } else {
@@ -1148,6 +1292,24 @@ public String visitExpressionStatement(ExpressionStatement node) {
             node.right.accept(this);
             builder.append(")");
             return null;
+        }
+
+        // handle assignments for interfaces
+        if (node.operator.equals("=")) {
+            String leftBase = stripPointer(t1);
+            Symbol leftSym = symbols.get(leftBase);
+            if (leftSym != null && leftSym.kind == Symbol.Kind.INTERFACE) {
+                String rightBase = stripPointer(t2);
+                Symbol rightSym = symbols.get(rightBase);
+                if (rightSym != null && rightSym.kind == Symbol.Kind.CLASS) {
+                    node.left.accept(this);
+                    builder.append(" = (").append(toCName(leftBase)).append("){ .obj = ");
+                    if (!t2.endsWith("*")) builder.append("&");
+                    node.right.accept(this);
+                    builder.append(", .vtable = &__bolt_vtable_").append(toCName(rightBase)).append("_").append(toCName(leftBase)).append(" }");
+                    return null;
+                }
+            }
         }
 
         if (node.operator.equals("+=") && "string".equals(t1)) {
@@ -1268,16 +1430,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
         return null;
     }
 
-    // gets the root object name
-    private String getObjectName(ASTNode node) {
-        if (node instanceof Identifier id) {
-            return id.name;
-        } else if (node instanceof MemberAccess ma) {
-            return getObjectName(ma.object);
-        }
-        return node.toString();
-    }
-
 
     @Override
     public String visitFunctionCall(FunctionCall node) {
@@ -1312,12 +1464,31 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
             // for generics, we might need to find the base type to check if it should mangle
             String baseTypeName = typeName;
-            if (typeName.contains("_")) { // simple mangled generic name
-                baseTypeName = typeName.substring(0, typeName.indexOf("_"));
+            int underscoreIndex = typeName.indexOf('_');
+            if (underscoreIndex != -1) { // simple mangled generic name
+                baseTypeName = typeName.substring(0, underscoreIndex);
             }
 
             Symbol classSym = symbols.get(typeName);
             if (classSym == null) classSym = symbols.get(baseTypeName);
+
+            if (classSym != null && classSym.kind == Symbol.Kind.INTERFACE) {
+                // Interface call: ((Interface_VTable*)ma.vtable)->member(ma.obj, args)
+                builder.append("((").append(toCName(typeName)).append("_VTable*)");
+                ma.object.accept(this);
+                builder.append(".vtable)->").append(ma.member).append("(");
+                ma.object.accept(this);
+                builder.append(".obj");
+                if (node.arguments != null && !node.arguments.isEmpty()) {
+                    builder.append(", ");
+                    for (int i = 0; i < node.arguments.size(); i++) {
+                        node.arguments.get(i).accept(this);
+                        if (i < node.arguments.size() - 1) builder.append(", ");
+                    }
+                }
+                builder.append(")");
+                return null;
+            }
 
             boolean mangle = true;
             if (classSym != null && classSym.members.containsKey(ma.member)) {
@@ -1325,7 +1496,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
             }
 
             if (mangle) {
-                System.out.println("Mangling " + ma.member + " with args " + argTypes + " and type " + typeName + " to " + mangleIdentifier(ma.member, argTypes, typeName));
                 builder.append(mangleIdentifier(ma.member, argTypes, typeName));
             } else {
                 builder.append(toCName(typeName)).append("_").append(ma.member);
@@ -1412,6 +1582,22 @@ public String visitExpressionStatement(ExpressionStatement node) {
                 }
             }
             builder.append(")");
+        } else if (node.function instanceof LambdaExpression) {
+            if (!config.getBoolean("lambdas")) {
+                reporter.report(new Token(TokenType.KEYWORD, "lambda", node.line, node.column, 0), "Lambdas are forbidden by configuration");
+            }
+            // Lambda function call: emit the lambda name and arguments
+            node.function.accept(this);
+            builder.append("(");
+            if (node.arguments != null) {
+                for (int i = 0; i < node.arguments.size(); i++) {
+                    node.arguments.get(i).accept(this);
+                    if (i < node.arguments.size() - 1) {
+                        builder.append(", ");
+                    }
+                }
+            }
+            builder.append(")");
         } else {
             node.function.accept(this);
             builder.append("(");
@@ -1441,6 +1627,59 @@ public String visitExpressionStatement(ExpressionStatement node) {
             builder.append(node.operator);
             node.operand.accept(this);
         }
+        return null;
+    }
+
+    @Override
+    public String visitLambdaExpression(LambdaExpression node) {
+        // Check if this lambda was already collected
+        int lambdaIndex = lambdaFunctions.indexOf(node);
+        if (lambdaIndex == -1) {
+            // Not collected yet, add it now
+            lambdaIndex = lambdaFunctions.size();
+            lambdaFunctions.add(node);
+
+            // Build the function signature
+            StringBuilder sig = new StringBuilder();
+            sig.append("/* lambda */ ");
+
+            // Determine return type from body
+            String returnType = "void";
+            if (node.body instanceof Block) {
+                // Check if the block has a return statement
+                // For simplicity, we'll use void for now
+            } else {
+                // Single expression - use its type
+                returnType = resolveType(node.body);
+                if (returnType.equals("unknown")) {
+                    returnType = "__auto_type";
+                } else {
+                    returnType = toCName(returnType);
+                }
+            }
+
+            sig.append(returnType).append(" ").append("__bolt_lambda_" + lambdaIndex).append("(");
+
+            // Add parameters
+            for (int i = 0; i < node.parameters.size(); i++) {
+                Parameter p = node.parameters.get(i);
+                String paramType = toCName(p.type.toString());
+                if (paramType.equals("unknown")) paramType = "__auto_type";
+                sig.append(paramType).append(" ").append(p.name);
+                if (i < node.parameters.size() - 1) {
+                    sig.append(", ");
+                }
+            }
+
+            sig.append(")");
+
+            // Store the signature for later emission
+            lambdaSignatures.put("__bolt_lambda_" + lambdaIndex, sig.toString());
+        }
+
+        // Emit the function call (the lambda itself)
+        builder.append("__bolt_lambda_" + lambdaIndex);
+
         return null;
     }
 
@@ -1549,7 +1788,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
         emitTrace(node);
         String baseType = getBaseTypeName(node.type);
 
-        if (config.getBoolean("no-heap") && baseType.equals("string")) {
+        if (config.getBoolean("no-heap") && isStringType(baseType)) {
              reporter.report(new Token(TokenType.IDENTIFIER, node.name, node.line, node.column, 0), "Managed 'string' is forbidden in no-heap mode. Use 'char*' for raw buffers.");
         }
 
@@ -1570,14 +1809,14 @@ public String visitExpressionStatement(ExpressionStatement node) {
         StringBuilder initBuilder = new StringBuilder();
         builder = initBuilder;
         if (node.initializer != null) {
-            if (baseType.equals("string") && !(node.initializer instanceof FunctionCall)) {
+            if (isStringType(baseType) && !(node.initializer instanceof FunctionCall)) {
                 builder.append("__bolt_string_copy(");
                 node.initializer.accept(this);
                 builder.append(")");
             } else {
                 node.initializer.accept(this);
             }
-        } else if (baseType.equals("string")) {
+        } else if (isStringType(baseType)) {
             builder.append("NULL");
         }
         String initCode = initBuilder.toString();
@@ -1592,20 +1831,39 @@ public String visitExpressionStatement(ExpressionStatement node) {
         emitIndent();
         builder.append(declPrefix);
         if (!initCode.isEmpty()) {
-            builder.append(" = ").append(initCode);
+            Symbol targetSym = symbols.get(baseType);
+            if (targetSym != null && targetSym.kind == Symbol.Kind.INTERFACE) {
+                String valType = resolveType(node.initializer);
+                String valBase = stripPointer(valType);
+                Symbol valSym = symbols.get(valBase);
+                if (valSym != null && valSym.kind == Symbol.Kind.CLASS) {
+                    // Implicit cast to interface: (Interface){ .obj = &val, .vtable = &__bolt_vtable_Val_Interface }
+                    builder.append(" = (").append(toCName(baseType)).append("){ .obj = ");
+                    if (!valType.endsWith("*")) builder.append("&");
+                    builder.append(initCode).append(", .vtable = &__bolt_vtable_").append(toCName(valBase)).append("_").append(toCName(baseType)).append(" }");
+                } else {
+                    builder.append(" = ").append(initCode);
+                }
+            } else {
+                builder.append(" = ").append(initCode);
+            }
         }
         builder.append(";\n");
 
         Symbol classSym = symbols.get(baseType);
-        if (baseType.equals("string")) {
+        if (isStringType(baseType)) {
             allActiveInstances.add(node.name);
         } else if (classSym != null && classSym.kind == Symbol.Kind.CLASS && !(node.type instanceof PointerType)) {
             allActiveInstances.add(node.name);
             if (node.initializer == null && classSym.members.containsKey("init")) {
-                boolean mangle = config.getBoolean("mangle");
-                String method = mangle ? mangleIdentifier("init", new ArrayList<>(), baseType) : toCName(baseType) + "_init";
-                emitIndent();
-                builder.append(method).append("(&").append(node.name).append(");\n");
+                Symbol initSym = classSym.members.get("init");
+                // Only call no-arg init if the init method has no parameters
+                if (initSym != null && initSym.parameterTypes.isEmpty()) {
+                    boolean mangle = config.getBoolean("mangle");
+                    String method = mangle ? mangleIdentifier("init", new ArrayList<>(), baseType) : toCName(baseType) + "_init";
+                    emitIndent();
+                    builder.append(method).append("(&").append(node.name).append(");\n");
+                }
             }
         }
 
@@ -1614,7 +1872,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
     @Override
     public String visitPrimitiveType(PrimitiveType node) {
-        if (node.name.equals("string")) {
+        if (isStringType(node.name)) {
             builder.append("char*");
             return "char*";
         }
@@ -1645,7 +1903,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
             builder.append(node.name);
             return node.name;
         }
-        if (node.name.equals("string")) {
+        if (isStringType(node.name)) {
             builder.append("char*");
             return "char*";
         }
@@ -1799,7 +2057,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
                 String prelude = null;
                 String postlude = null;
-                boolean mangle = config.getBoolean("mangle");
                 if (className != null && (node.name.equals("init") || node.name.equals("dinit"))) {
                     prelude = "if (!self) return NULL;\n";
                     postlude = "return self;\n";
@@ -1847,7 +2104,114 @@ public String visitExpressionStatement(ExpressionStatement node) {
         generateFunctionBody(node, null, false);
         return null;
     }
-    
+
+    private void collectLambdas(ASTNode node) {
+        if (node instanceof LambdaExpression lambda) {
+            int lambdaIndex = lambdaFunctions.size();
+            String lambdaName = "__bolt_lambda_" + lambdaIndex;
+            lambdaFunctions.add(lambda);
+
+            // Build the function signature
+            StringBuilder sig = new StringBuilder();
+            sig.append("/* lambda */ ");
+
+            // Determine return type from body
+            String returnType = "void";
+            if (lambda.body instanceof Block) {
+                // Check if the block has a return statement
+                // For simplicity, we'll use void for now
+            } else {
+                // Single expression - use its type
+                returnType = resolveType(lambda.body);
+                if (returnType.equals("unknown")) {
+                    returnType = "__auto_type";
+                } else {
+                    returnType = toCName(returnType);
+                }
+            }
+
+            sig.append(returnType).append(" ").append(lambdaName).append("(");
+
+            // Add parameters
+            for (int i = 0; i < lambda.parameters.size(); i++) {
+                Parameter p = lambda.parameters.get(i);
+                String paramType = toCName(p.type.toString());
+                if (paramType.equals("unknown")) paramType = "__auto_type";
+                sig.append(paramType).append(" ").append(p.name);
+                if (i < lambda.parameters.size() - 1) {
+                    sig.append(", ");
+                }
+            }
+
+            sig.append(")");
+
+            // Store the signature for later emission
+            lambdaSignatures.put(lambdaName, sig.toString());
+        } else if (node instanceof Block block) {
+            for (ASTNode stmt : block.statements) {
+                collectLambdas(stmt);
+            }
+        } else if (node instanceof FunctionDeclaration func) {
+            if (func.body != null) {
+                collectLambdas(func.body);
+            }
+        } else if (node instanceof IfStatement ifStmt) {
+            collectLambdas(ifStmt.condition);
+            collectLambdas(ifStmt.thenBranch);
+            if (ifStmt.elseBranch != null) {
+                collectLambdas(ifStmt.elseBranch);
+            }
+        } else if (node instanceof WhileStatement whileStmt) {
+            collectLambdas(whileStmt.condition);
+            collectLambdas(whileStmt.body);
+        } else if (node instanceof DoWhileStatement doWhileStmt) {
+            collectLambdas(doWhileStmt.condition);
+            collectLambdas(doWhileStmt.body);
+        } else if (node instanceof ForStatement forStmt) {
+            if (forStmt.initializer != null) collectLambdas(forStmt.initializer);
+            if (forStmt.condition != null) collectLambdas(forStmt.condition);
+            if (forStmt.update != null) collectLambdas(forStmt.update);
+            collectLambdas(forStmt.body);
+        } else if (node instanceof SwitchStatement switchStmt) {
+            collectLambdas(switchStmt.expression);
+            collectLambdas(switchStmt.body);
+        } else if (node instanceof CaseStatement caseStmt) {
+            if (caseStmt.value != null) collectLambdas(caseStmt.value);
+            for (ASTNode stmt : caseStmt.statements) {
+                collectLambdas(stmt);
+            }
+        } else if (node instanceof DefaultStatement defaultStmt) {
+            for (ASTNode stmt : defaultStmt.statements) {
+                collectLambdas(stmt);
+            }
+        } else if (node instanceof ReturnStatement returnStmt) {
+            if (returnStmt.value != null) collectLambdas(returnStmt.value);
+        } else if (node instanceof ExpressionStatement exprStmt) {
+            collectLambdas(exprStmt.expression);
+        } else if (node instanceof VariableDeclaration varDecl) {
+            if (varDecl.initializer != null) collectLambdas(varDecl.initializer);
+        } else if (node instanceof AssignmentExpression assignExpr) {
+            collectLambdas(assignExpr.target);
+            collectLambdas(assignExpr.value);
+        } else if (node instanceof BinaryExpression binExpr) {
+            collectLambdas(binExpr.left);
+            collectLambdas(binExpr.right);
+        } else if (node instanceof UnaryExpression unaryExpr) {
+            collectLambdas(unaryExpr.operand);
+        } else if (node instanceof FunctionCall funcCall) {
+            collectLambdas(funcCall.function);
+            if (funcCall.arguments != null) {
+                for (ASTNode arg : funcCall.arguments) {
+                    collectLambdas(arg);
+                }
+            }
+        } else if (node instanceof TernaryExpression ternaryExpr) {
+            collectLambdas(ternaryExpr.condition);
+            collectLambdas(ternaryExpr.trueExpression);
+            collectLambdas(ternaryExpr.falseExpression);
+        }
+    }
+
     public Codegen() {
         this.tree = new ASTTree();
         this.symbols = new SymbolTree();

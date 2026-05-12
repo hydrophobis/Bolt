@@ -20,7 +20,9 @@ public class Tokenizer {
             "sizeof", "static", "struct", "switch", "typedef",
             "union", "unsigned", "void", "volatile", "while",
             "class", "public", "private", "protected", "import",
-            "impl", "operator", "package", "new", "delete");
+            "impl", "operator", "package", "new", "delete",
+            "interface", "implements", "self", "true", "false", "NULL",
+            "fn");
 
     public Tokenizer(String input) {
         this.input = input;
@@ -112,6 +114,14 @@ public class Tokenizer {
                     }
                     break;
 
+                case '%':
+                    advance();
+                    if (match('='))
+                        tokens.add(new Token(TokenType.PERCENT_ASSIGN, "%=", start, startLine, startCol));
+                    else
+                        tokens.add(new Token(TokenType.PERCENT, "%", start, startLine, startCol));
+                    break;
+
                 case '=':
                     advance();
                     tokens.add(new Token(match('=') ? TokenType.EQUAL : TokenType.ASSIGN,
@@ -126,9 +136,12 @@ public class Tokenizer {
 
                 case '<':
                     advance();
-                    if (match('<'))
-                        tokens.add(new Token(TokenType.SHIFT_LEFT, "<<", start, startLine, startCol));
-                    else if (match('='))
+                    if (match('<')) {
+                        if (match('='))
+                            tokens.add(new Token(TokenType.SHIFT_LEFT_ASSIGN, "<<=", start, startLine, startCol));
+                        else
+                            tokens.add(new Token(TokenType.SHIFT_LEFT, "<<", start, startLine, startCol));
+                    } else if (match('='))
                         tokens.add(new Token(TokenType.LESS_EQUAL, "<=", start, startLine, startCol));
                     else
                         tokens.add(new Token(TokenType.LESS, "<", start, startLine, startCol));
@@ -136,9 +149,12 @@ public class Tokenizer {
 
                 case '>':
                     advance();
-                    if (match('>'))
-                        tokens.add(new Token(TokenType.SHIFT_RIGHT, ">>", start, startLine, startCol));
-                    else if (match('='))
+                    if (match('>')) {
+                        if (match('='))
+                            tokens.add(new Token(TokenType.SHIFT_RIGHT_ASSIGN, ">>=", start, startLine, startCol));
+                        else
+                            tokens.add(new Token(TokenType.SHIFT_RIGHT, ">>", start, startLine, startCol));
+                    } else if (match('='))
                         tokens.add(new Token(TokenType.GREATER_EQUAL, ">=", start, startLine, startCol));
                     else
                         tokens.add(new Token(TokenType.GREATER, ">", start, startLine, startCol));
@@ -146,19 +162,30 @@ public class Tokenizer {
 
                 case '&':
                     advance();
-                    tokens.add(new Token(match('&') ? TokenType.LOGICAL_AND : TokenType.BIT_AND,
-                            input.substring(start, pos), start, startLine, startCol));
+                    if (match('&'))
+                        tokens.add(new Token(TokenType.LOGICAL_AND, "&&", start, startLine, startCol));
+                    else if (match('='))
+                        tokens.add(new Token(TokenType.BIT_AND_ASSIGN, "&=", start, startLine, startCol));
+                    else
+                        tokens.add(new Token(TokenType.BIT_AND, "&", start, startLine, startCol));
                     break;
 
                 case '|':
                     advance();
-                    tokens.add(new Token(match('|') ? TokenType.LOGICAL_OR : TokenType.BIT_OR,
-                            input.substring(start, pos), start, startLine, startCol));
+                    if (match('|'))
+                        tokens.add(new Token(TokenType.LOGICAL_OR, "||", start, startLine, startCol));
+                    else if (match('='))
+                        tokens.add(new Token(TokenType.BIT_OR_ASSIGN, "|=", start, startLine, startCol));
+                    else
+                        tokens.add(new Token(TokenType.BIT_OR, "|", start, startLine, startCol));
                     break;
 
                 case '^':
                     advance();
-                    tokens.add(new Token(TokenType.BIT_XOR, "^", start, startLine, startCol));
+                    if (match('='))
+                        tokens.add(new Token(TokenType.BIT_XOR_ASSIGN, "^=", start, startLine, startCol));
+                    else
+                        tokens.add(new Token(TokenType.BIT_XOR, "^", start, startLine, startCol));
                     break;
 
                 case '~':
@@ -269,6 +296,33 @@ public class Tokenizer {
     private Token readNumber(int start, int startLine, int startCol) {
         boolean isFloat = false;
 
+        // Check for hex (0x, 0X), octal (0o, 0O), or binary (0b, 0B) prefixes
+        if (peek() == '0' && pos + 1 < input.length()) {
+            char nextChar = input.charAt(pos + 1);
+            if (nextChar == 'x' || nextChar == 'X') {
+                pos += 2;
+                col += 2;
+                while (!isAtEnd() && isHexDigit(peek()))
+                    advance();
+                String lexeme = input.substring(start, pos);
+                return new Token(TokenType.INTEGER_LITERAL, lexeme, start, startLine, startCol);
+            } else if (nextChar == 'o' || nextChar == 'O') {
+                pos += 2;
+                col += 2;
+                while (!isAtEnd() && isOctalDigit(peek()))
+                    advance();
+                String lexeme = input.substring(start, pos);
+                return new Token(TokenType.INTEGER_LITERAL, lexeme, start, startLine, startCol);
+            } else if (nextChar == 'b' || nextChar == 'B') {
+                pos += 2;
+                col += 2;
+                while (!isAtEnd() && isBinaryDigit(peek()))
+                    advance();
+                String lexeme = input.substring(start, pos);
+                return new Token(TokenType.INTEGER_LITERAL, lexeme, start, startLine, startCol);
+            }
+        }
+
         while (!isAtEnd() && Character.isDigit(peek()))
             advance();
 
@@ -284,6 +338,18 @@ public class Tokenizer {
                 isFloat ? TokenType.FLOAT_LITERAL : TokenType.INTEGER_LITERAL,
                 lexeme,
                 start, startLine, startCol);
+    }
+
+    private boolean isHexDigit(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    }
+
+    private boolean isOctalDigit(char c) {
+        return c >= '0' && c <= '7';
+    }
+
+    private boolean isBinaryDigit(char c) {
+        return c == '0' || c == '1';
     }
 
     private Token readString(int start, int startLine, int startCol) {

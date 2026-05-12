@@ -538,4 +538,23 @@ public class ASTPrinter extends AbstractASTVisitor<String> {
         indentLevel--;
         return sb.toString();
     }
+
+    @Override
+    public String visitLambdaExpression(LambdaExpression node) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(indent()).append("LambdaExpression\n");
+        indentLevel++;
+        sb.append(indent()).append("Parameters:\n");
+        indentLevel++;
+        for (Parameter param : node.parameters) {
+            sb.append(printWithDecorators(param));
+        }
+        indentLevel--;
+        sb.append(indent()).append("Body:\n");
+        indentLevel++;
+        sb.append(node.body.accept(this));
+        indentLevel--;
+        indentLevel--;
+        return sb.toString();
+    }
 }

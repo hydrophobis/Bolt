@@ -6,6 +6,7 @@ public class ClassDeclaration extends ASTNode{
     public String name;
     public ASTTree inner;
     public java.util.List<String> genericParams = new java.util.ArrayList<>();
+    public java.util.List<String> interfaces = new java.util.ArrayList<>();
 
     public ClassDeclaration(String name, ASTTree inner) {
         super();

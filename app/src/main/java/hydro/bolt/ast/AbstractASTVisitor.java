@@ -260,6 +260,11 @@ public abstract class AbstractASTVisitor<T> implements ASTVisitor<T> {
     }
 
     @Override
+    public T visitInterfaceDeclaration(hydro.bolt.ast.bolt.InterfaceDeclaration node) {
+        return defaultValue;
+    }
+
+    @Override
     public T visit(ImportDeclaration node) {
         return defaultValue;
     }
@@ -302,6 +307,11 @@ public abstract class AbstractASTVisitor<T> implements ASTVisitor<T> {
     
     @Override
     public T visitBinaryOverload(BinaryOverloadNode overload) {
+        return defaultValue;
+    }
+
+    @Override
+    public T visitLambdaExpression(LambdaExpression lambda) {
         return defaultValue;
     }
 

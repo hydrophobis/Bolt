@@ -1,7 +1,5 @@
 package hydro.bolt.ast.bolt;
 
-import javax.management.RuntimeErrorException;
-
 import hydro.bolt.ast.ASTNode;
 import hydro.bolt.ast.ASTVisitor;
 import hydro.bolt.ast.RawCNode;

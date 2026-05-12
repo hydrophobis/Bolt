@@ -28,6 +28,87 @@ public class Parser {
     public hydro.bolt.Config config = new hydro.bolt.Config();
     public ErrorReporter reporter = new ErrorReporter();
 
+    private static final Set<TokenType> BINARY_OPERATORS = Set.of(
+        TokenType.PLUS, TokenType.MINUS, TokenType.STAR, TokenType.SLASH, TokenType.PERCENT,
+        TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.LESS, TokenType.LESS_EQUAL,
+        TokenType.GREATER, TokenType.GREATER_EQUAL,
+        TokenType.LOGICAL_AND, TokenType.LOGICAL_OR,
+        TokenType.BIT_AND, TokenType.BIT_OR, TokenType.BIT_XOR,
+        TokenType.SHIFT_LEFT, TokenType.SHIFT_RIGHT,
+        TokenType.ASSIGN,
+        TokenType.PLUS_ASSIGN,
+        TokenType.MINUS_ASSIGN,
+        TokenType.STAR_ASSIGN,
+        TokenType.SLASH_ASSIGN,
+        TokenType.PERCENT_ASSIGN,
+        TokenType.BIT_AND_ASSIGN,
+        TokenType.BIT_OR_ASSIGN,
+        TokenType.BIT_XOR_ASSIGN,
+        TokenType.SHIFT_LEFT_ASSIGN,
+        TokenType.SHIFT_RIGHT_ASSIGN,
+        TokenType.RBRACKET
+    );
+
+    private static final Map<TokenType, Integer> OPERATOR_PRECEDENCE = Map.ofEntries(
+        Map.entry(TokenType.ASSIGN, 5),
+        Map.entry(TokenType.PLUS_ASSIGN, 5),
+        Map.entry(TokenType.MINUS_ASSIGN, 5),
+        Map.entry(TokenType.STAR_ASSIGN, 5),
+        Map.entry(TokenType.SLASH_ASSIGN, 5),
+        Map.entry(TokenType.PERCENT_ASSIGN, 5),
+        Map.entry(TokenType.BIT_AND_ASSIGN, 5),
+        Map.entry(TokenType.BIT_OR_ASSIGN, 5),
+        Map.entry(TokenType.BIT_XOR_ASSIGN, 5),
+        Map.entry(TokenType.SHIFT_LEFT_ASSIGN, 5),
+        Map.entry(TokenType.SHIFT_RIGHT_ASSIGN, 5),
+        Map.entry(TokenType.LOGICAL_OR, 10),
+        Map.entry(TokenType.LOGICAL_AND, 20),
+        Map.entry(TokenType.EQUAL, 30),
+        Map.entry(TokenType.NOT_EQUAL, 30),
+        Map.entry(TokenType.LESS, 40),
+        Map.entry(TokenType.LESS_EQUAL, 40),
+        Map.entry(TokenType.GREATER, 40),
+        Map.entry(TokenType.GREATER_EQUAL, 40),
+        Map.entry(TokenType.SHIFT_LEFT, 45),
+        Map.entry(TokenType.SHIFT_RIGHT, 45),
+        Map.entry(TokenType.BIT_AND, 27),
+        Map.entry(TokenType.BIT_XOR, 26),
+        Map.entry(TokenType.BIT_OR, 25),
+        Map.entry(TokenType.PLUS, 50),
+        Map.entry(TokenType.MINUS, 50),
+        Map.entry(TokenType.STAR, 60),
+        Map.entry(TokenType.SLASH, 60),
+        Map.entry(TokenType.PERCENT, 60),
+        Map.entry(TokenType.RBRACKET, 70)
+    );
+
+    private static final Map<String, String> OPERATOR_NAMES = Map.ofEntries(
+        Map.entry("+", "plus"),
+        Map.entry("-", "minus"),
+        Map.entry("*", "mul"),
+        Map.entry("/", "div"),
+        Map.entry("%", "mod"),
+        Map.entry("==", "eq"),
+        Map.entry("!=", "neq"),
+        Map.entry("<", "lt"),
+        Map.entry("<=", "lte"),
+        Map.entry(">", "gt"),
+        Map.entry(">=", "gte"),
+        Map.entry("&&", "land"),
+        Map.entry("||", "lor"),
+        Map.entry("!", "lnot"),
+        Map.entry("&", "band"),
+        Map.entry("|", "bor"),
+        Map.entry("^", "bxor"),
+        Map.entry("~", "bnot"),
+        Map.entry("<<", "shl"),
+        Map.entry(">>", "shr"),
+        Map.entry("[", "lbracket"),
+        Map.entry("]", "rbracket"),
+        Map.entry("(", "lparen"),
+        Map.entry(")", "rparen")
+    );
+
     public Parser(List<Token> tokens) {
         this.tokens = tokens;
     }
@@ -98,6 +179,7 @@ public class Parser {
         if (matchKeyword("import")) return parseImport();
         if (matchKeyword("class")) return parseClass();
         if (matchKeyword("struct")) return parseClass();
+        if (matchKeyword("interface")) return parseInterface();
         if (matchKeyword("impl")) return parseImpl();
 
         // Visibility block: public { ... } / private { ... }
@@ -210,12 +292,58 @@ public class Parser {
         consume(TokenType.RPAREN);
         consume(TokenType.LBRACE);
 
-        RawCNode body = new RawCNode("");
+        List<ASTNode> cases = new ArrayList<>();
+
         while (!check(TokenType.RBRACE) && !isAtEnd()) {
-            body = new RawCNode(body.content + consume().lexeme + " ");
+            if (check(TokenType.KEYWORD) && peek().lexeme.equals("case")) {
+                Token caseToken = consume(TokenType.KEYWORD);
+                ASTNode caseValue = parseExpression();
+                consume(TokenType.COLON);
+
+                List<ASTNode> caseBody = new ArrayList<>();
+                while (!check(TokenType.KEYWORD) && !check(TokenType.RBRACE) && !isAtEnd()) {
+                    if (check(TokenType.KEYWORD) && peek().lexeme.equals("case")) break;
+                    if (check(TokenType.KEYWORD) && peek().lexeme.equals("default")) break;
+                    ASTNode stmt = parseStatement();
+                    if (stmt != null) {
+                        caseBody.add(stmt);
+                    }
+                }
+
+                CaseStatement caseStmt = new CaseStatement(caseValue, caseBody);
+                caseStmt.line = caseToken.line;
+                caseStmt.column = caseToken.column;
+                cases.add(caseStmt);
+            } else if (check(TokenType.KEYWORD) && peek().lexeme.equals("default")) {
+                Token defaultToken = consume(TokenType.KEYWORD);
+                consume(TokenType.COLON);
+
+                List<ASTNode> defaultBody = new ArrayList<>();
+                while (!check(TokenType.KEYWORD) && !check(TokenType.RBRACE) && !isAtEnd()) {
+                    if (check(TokenType.KEYWORD) && peek().lexeme.equals("case")) break;
+                    if (check(TokenType.KEYWORD) && peek().lexeme.equals("default")) break;
+                    ASTNode stmt = parseStatement();
+                    if (stmt != null) {
+                        defaultBody.add(stmt);
+                    }
+                }
+
+                DefaultStatement defaultStmt = new DefaultStatement(defaultBody);
+                defaultStmt.line = defaultToken.line;
+                defaultStmt.column = defaultToken.column;
+                cases.add(defaultStmt);
+            } else {
+                // Skip unknown tokens
+                consume();
+            }
         }
 
         consume(TokenType.RBRACE);
+
+        Block body = new Block(cases);
+        body.line = switchToken.line;
+        body.column = switchToken.column;
+
         return new SwitchStatement(condition, body);
     }
 
@@ -287,57 +415,23 @@ public class Parser {
     }
 
     private boolean isBinaryOp(TokenType type) {
-        switch (type) {
-            case PLUS: case MINUS: case STAR: case SLASH: case PERCENT:
-            case EQUAL: case NOT_EQUAL: case LESS: case LESS_EQUAL:
-            case GREATER: case GREATER_EQUAL:
-            case LOGICAL_AND: case LOGICAL_OR:
-            case BIT_AND: case BIT_OR: case BIT_XOR:
-            case SHIFT_LEFT: case SHIFT_RIGHT:
-            case ASSIGN:
-            case PLUS_ASSIGN:
-            case MINUS_ASSIGN:
-            case STAR_ASSIGN:
-            case SLASH_ASSIGN:
-            case RBRACKET:
-                return true;
-            default:
-                return false;
-        }
+        return BINARY_OPERATORS.contains(type);
     }
 
     private int getPrecedence(TokenType type) {
-        switch (type) {
-            case ASSIGN:
-            case PLUS_ASSIGN:
-            case MINUS_ASSIGN:
-            case STAR_ASSIGN:
-            case SLASH_ASSIGN:
-                return 5;
-            case LOGICAL_OR: return 10;
-            case LOGICAL_AND: return 20;
-            case EQUAL: case NOT_EQUAL: return 30;
-            case LESS: case LESS_EQUAL: case GREATER: case GREATER_EQUAL: return 40;
-            case SHIFT_LEFT: case SHIFT_RIGHT: return 45;
-            case BIT_AND: return 27;
-            case BIT_XOR: return 26;
-            case BIT_OR: return 25;
-            case PLUS: case MINUS: return 50;
-            case STAR: case SLASH: case PERCENT: return 60;
-            case RBRACKET: return 70;
-            default: return 0;
-        }
+        Integer result = OPERATOR_PRECEDENCE.get(type);
+        return result != null ? result : 0;
     }
 
     private ASTNode parseUnary() {
-        if (check(TokenType.MINUS) || check(TokenType.LOGICAL_NOT) || 
-            check(TokenType.BIT_NOT) || check(TokenType.INCREMENT) || 
+        if (check(TokenType.MINUS) || check(TokenType.LOGICAL_NOT) ||
+            check(TokenType.BIT_NOT) || check(TokenType.INCREMENT) ||
             check(TokenType.DECREMENT) || check(TokenType.PLUS)) {
             Token op = consume();
             ASTNode operand = parseUnary();
             return new UnaryExpression(op.lexeme, operand, true);
         }
-        
+
         return parsePostfix();
     }
 
@@ -481,6 +575,9 @@ public class Parser {
                 if (t.lexeme.equals("switch")) {
                     return parseSwitchStatement();
                 }
+                if (t.lexeme.equals("fn")) {
+                    return parseLambda();
+                }
                 consume();
                 return new Identifier(t.lexeme);
 
@@ -519,6 +616,41 @@ public class Parser {
             default:
                 throw error(t, "Unexpected token in expression");
         }
+    }
+
+    private ASTNode parseLambda() {
+        Token fnToken = consume(TokenType.KEYWORD); // consume 'fn'
+        List<Parameter> parameters = new ArrayList<>();
+
+        // Parse parameters
+        consume(TokenType.LPAREN);
+        if (!check(TokenType.RPAREN)) {
+            do {
+                ASTNode paramType = parseType();
+                Token paramName = consume(TokenType.IDENTIFIER);
+                Parameter param = new Parameter(paramType, paramName.lexeme);
+                param.line = paramName.line;
+                param.column = paramName.column;
+                parameters.add(param);
+            } while (match(TokenType.COMMA));
+        }
+        consume(TokenType.RPAREN);
+
+        // Parse body - either a block or a single expression
+        ASTNode body;
+        if (check(TokenType.LBRACE)) {
+            Token t = consume(TokenType.LBRACE);
+            body = new Block(parseBlockStatements());
+            body.line = t.line;
+            body.column = t.column;
+        } else {
+            body = parseExpression();
+        }
+
+        LambdaExpression lambda = new LambdaExpression(parameters, body);
+        lambda.line = fnToken.line;
+        lambda.column = fnToken.column;
+        return lambda;
     }
 
     private ASTNode parseStatement() {
@@ -729,69 +861,15 @@ public class Parser {
     
     // keep this until blocks are fully supported
     private String getSafeOperatorName(String op) {
-        switch (op) {
-            case "+": return "plus";
-            case "-": return "minus";
-            case "*": return "mul";
-            case "/": return "div";
-            case "%": return "mod";
-            case "==": return "eq";
-            case "!=": return "neq";
-            case "<": return "lt";
-            case "<=": return "lte";
-            case ">": return "gt";
-            case ">=": return "gte";
-            case "&&": return "land";
-            case "||": return "lor";
-            case "!": return "lnot";
-            case "&": return "band";
-            case "|": return "bor";
-            case "^": return "bxor";
-            case "~": return "bnot";
-            case "<<": return "shl";
-            case ">>": return "shr";
-            case "[": return "lbracket";
-            case "]": return "rbracket";
-            case "(": return "lparen";
-            case ")": return "rparen";
-            default:
-                StringBuilder sb = new StringBuilder();
-                for (char c : op.toCharArray()) {
-                    if (Character.isLetterOrDigit(c)) sb.append(c);
-                    else sb.append("_").append((int)c);
-                }
-                return sb.toString();
-        }
-    }
+        String result = OPERATOR_NAMES.get(op);
+        if (result != null) return result;
 
-    private String blockToRawC(Block block) {
         StringBuilder sb = new StringBuilder();
-        if (block.statements != null) {
-            for (ASTNode stmt : block.statements) {
-                sb.append(nodeToString(stmt)).append(" ");
-            }
+        for (char c : op.toCharArray()) {
+            if (Character.isLetterOrDigit(c)) sb.append(c);
+            else sb.append("_").append((int)c);
         }
-        return sb.toString().trim();
-    }
-    
-    // basic node to string helper
-    private String nodeToString(ASTNode node) {
-        if (node instanceof RawCNode raw) {
-            return raw.content;
-        } else if (node instanceof ReturnStatement ret) {
-            return "return " + (ret.value != null ? nodeToString(ret.value) : "") + ";";
-        } else if (node instanceof Identifier id) {
-            return id.name;
-        } else if (node instanceof UnaryExpression unary) {
-            if (unary.isPrefix) {
-                return unary.operator + nodeToString(unary.operand);
-            } else {
-                return nodeToString(unary.operand) + unary.operator;
-            }
-        } else if (node instanceof ExpressionStatement exprStmt) {
-            return nodeToString(exprStmt.expression) + ";";
-        }
-        return node.toString();
+        return sb.toString();
     }
 
     private DecoratorNode parseDecorator() {
@@ -827,7 +905,7 @@ public class Parser {
 
     private ImportDeclaration parseImport() {
         if (check(TokenType.LESS)) {
-            Token lt = consume(TokenType.LESS);
+            consume(TokenType.LESS);
             StringBuilder header = new StringBuilder();
             while (!check(TokenType.GREATER) && !isAtEnd()) {
                 header.append(consume().lexeme);
@@ -878,6 +956,13 @@ public class Parser {
             consume(TokenType.GREATER);
         }
 
+        List<String> interfaces = new ArrayList<>();
+        if (matchKeyword("implements")) {
+            do {
+                interfaces.add(consume(TokenType.IDENTIFIER).lexeme);
+            } while (match(TokenType.COMMA));
+        }
+
         consume(TokenType.LBRACE);
         ASTTree members = new ASTTree();
         while (!check(TokenType.RBRACE) && !isAtEnd()) {
@@ -921,6 +1006,7 @@ public class Parser {
 
         ClassDeclaration classNode = new ClassDeclaration(name.lexeme, members);
         classNode.genericParams = genericParams;
+        classNode.interfaces = interfaces;
         String fullClassName = (currentPackage != null) ? currentPackage + "." + name.lexeme : name.lexeme;
         
         Symbol classSym = new Symbol(name.lexeme, Symbol.Kind.CLASS, name.lexeme);
@@ -931,13 +1017,54 @@ public class Parser {
                 classSym.members.put(var.name, memberSymbol);
             } else if (memberNode instanceof FunctionDeclaration func) {
                 Symbol funcSymbol = new Symbol(func.name, Symbol.Kind.FUNCTION, func.returnType.toString());
-                funcSymbol.mangle = true; 
+                funcSymbol.mangle = true;
+                if (func.parameters != null) {
+                    for (Parameter p : func.parameters) {
+                        funcSymbol.parameterTypes.add(p.type.toString());
+                    }
+                }
                 classSym.members.put(func.name, funcSymbol);
             }
         }
         symbols.put(fullClassName, classSym);
         
         return classNode;
+    }
+
+    private InterfaceDeclaration parseInterface() {
+        Token name = consume(TokenType.IDENTIFIER);
+        consume(TokenType.LBRACE);
+        ASTTree members = new ASTTree();
+        while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            ASTNode node = parseDeclaration();
+            if (node != null) {
+                if (!(node instanceof FunctionDeclaration)) {
+                    reporter.report(new Token(TokenType.IDENTIFIER, name.lexeme, node.line, node.column, 0), "Interfaces can only contain function declarations");
+                }
+                members.add(node);
+            }
+        }
+        consume(TokenType.RBRACE);
+
+        InterfaceDeclaration interfaceNode = new InterfaceDeclaration(name.lexeme, members);
+        String fullInterfaceName = (currentPackage != null) ? currentPackage + "." + name.lexeme : name.lexeme;
+        
+        Symbol interfaceSym = new Symbol(name.lexeme, Symbol.Kind.INTERFACE, name.lexeme);
+        for (ASTNode memberNode : members) {
+            if (memberNode instanceof FunctionDeclaration func) {
+                Symbol funcSymbol = new Symbol(func.name, Symbol.Kind.FUNCTION, func.returnType.toString());
+                funcSymbol.mangle = true;
+                if (func.parameters != null) {
+                    for (Parameter p : func.parameters) {
+                        funcSymbol.parameterTypes.add(p.type.toString());
+                    }
+                }
+                interfaceSym.members.put(func.name, funcSymbol);
+            }
+        }
+        symbols.put(fullInterfaceName, interfaceSym);
+        
+        return interfaceNode;
     }
 
 
@@ -1028,29 +1155,6 @@ public class Parser {
         return new RawCNode(content);
     }
 
-
-
-
-    private String captureBracedContent() {
-        int braceLevel = 1;
-        StringBuilder content = new StringBuilder();
-
-        while (braceLevel > 0 && !isAtEnd()) {
-            Token t = consume();
-            if (t.type == TokenType.LBRACE)
-                braceLevel++;
-            if (t.type == TokenType.RBRACE)
-                braceLevel--;
-
-            if (braceLevel > 0) {
-                // SHITTY CODE: needs original source spacing
-                content.append(t.lexeme).append(" ");
-            }
-        }
-
-        return content.toString();
-    }
-
     private boolean check(TokenType type) {
         if (isAtEnd())
             return false;
@@ -1123,13 +1227,6 @@ public class Parser {
 
             consume();
         }
-    }
-
-    private void consumeKeyword(String lexeme) {
-        if (checkKeyword(lexeme))
-            consume();
-        else
-            throw error(peek(), "Expected keyword " + lexeme);
     }
 
     private boolean matchKeyword(String lexeme) {

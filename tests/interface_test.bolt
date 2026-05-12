@@ -1,0 +1,64 @@
+// interface_test.bolt
+import stdio;
+
+interface Shape {
+    void draw();
+    int getArea();
+}
+
+class Circle implements Shape {
+    int radius;
+
+    public void init(int r) {
+        self.radius = r;
+    }
+
+    public void draw() {
+        printf("Drawing Circle with radius: %d\n", self.radius);
+    }
+
+    public int getArea() {
+        return 3 * self.radius * self.radius; // integer pi approx
+    }
+}
+
+class Square implements Shape {
+    int side;
+
+    public void init(int s) {
+        self.side = s;
+    }
+
+    public void draw() {
+        printf("Drawing Square with side: %d\n", self.side);
+    }
+
+    public int getArea() {
+        return self.side * self.side;
+    }
+}
+
+void render(Shape s) {
+    s.draw();
+    printf("Area: %d\n", s.getArea());
+}
+
+int main() {
+    Circle c;
+    c.init(5);
+
+    Square s;
+    s.init(10);
+
+    printf("--- Dynamic Dispatch Test ---\n");
+
+    Shape shape;
+
+    shape = c;
+    render(shape);
+
+    shape = s;
+    render(shape);
+
+    return 0;
+}

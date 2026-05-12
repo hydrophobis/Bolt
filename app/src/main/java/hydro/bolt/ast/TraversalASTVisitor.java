@@ -342,4 +342,15 @@ public abstract class TraversalASTVisitor extends AbstractASTVisitor<Void> {
     public Void visit(RawCNode node) {
         return null;
     }
+
+    @Override
+    public Void visitLambdaExpression(LambdaExpression node) {
+        for (Parameter param : node.parameters) {
+            param.accept(this);
+        }
+        if (node.body != null) {
+            node.body.accept(this);
+        }
+        return null;
+    }
 }

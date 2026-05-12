@@ -30,8 +30,11 @@ public class Bolt {
         String inputFile = null;
         String outputFile = null;
 
-        for (String arg : args) {
-            if (arg.startsWith("--")) {
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equals("-o") && i + 1 < args.length) {
+                outputFile = args[++i];
+            } else if (arg.startsWith("--")) {
                 String kv = arg.substring(2);
                 if (kv.contains("=")) {
                     String[] parts = kv.split("=", 2);
@@ -58,7 +61,8 @@ public class Bolt {
 
         if (config.getBoolean("verbose")) {
             System.out.println("Bolt Compiler - Configuration:");
-            for (String key : new String[]{"mangle", "mangle-prefix", "indent-size", "brace-style", "allow-recursion"}) {
+            String[] verboseKeys = {"mangle", "mangle-prefix", "indent-size", "brace-style", "allow-recursion"};
+            for (String key : verboseKeys) {
                 System.out.println("  " + key + ": " + config.get(key));
             }
         }
@@ -101,12 +105,6 @@ public class Bolt {
             } else {
                 outputFile = baseName + ".c";
             }
-        } else if (!packageDir.isEmpty()) {
-            java.nio.file.Path explicitPath = Paths.get(outputFile);
-            String explicitPathNormalized = explicitPath.toString().replace('\\', '/');
-            if (explicitPath.getParent() == null || !explicitPathNormalized.contains(packageDir + "/")) {
-                outputFile = packageDir + "/" + explicitPath.getFileName().toString();
-            }
         }
 
         // Ensure output directory exists
@@ -119,12 +117,13 @@ public class Bolt {
         generator.symbols = parser.symbols;
         generator.imports = parser.imports;
         generator.reporter = reporter;
-        String generatedCode = "";
+        String generatedCode;
         try {
             generatedCode = generator.generate();
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(1);
+            throw new RuntimeException("Unreachable"); // satisfies compiler
         }
 
         if (reporter.hasErrors()) {
@@ -138,12 +137,9 @@ public class Bolt {
             }
             System.out.println("Transpilation successful. Output written to " + outputFile);
 
-            String headerFile;
-            if (outputFile.endsWith(".c")) {
-                headerFile = outputFile.substring(0, outputFile.length() - 2) + ".h";
-            } else {
-                headerFile = outputFile + ".h";
-            }
+            String headerFile = outputFile.endsWith(".c")
+                ? outputFile.substring(0, outputFile.length() - 2) + ".h"
+                : outputFile + ".h";
 
             java.nio.file.Path headerPath = Paths.get(headerFile);
             if (headerPath.getParent() != null) {

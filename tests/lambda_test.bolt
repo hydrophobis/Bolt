@@ -1,0 +1,27 @@
+// Test lambda expressions
+
+int main() {
+    // Simple lambda with no parameters - call directly
+    fn() { printf("Simple lambda: 42\n"); }();
+
+    // Lambda with parameters - call directly
+    fn(int a, int b) { printf("Add lambda: %d\n", a + b); }(5, 3);
+
+    // Lambda with single expression - call directly
+    fn(int x) { printf("Square lambda: %d\n", x * x); }(4);
+
+    // Lambda with multiple statements - call directly
+    fn(int n) {
+        if (n <= 1) {
+            printf("Factorial lambda: 1\n");
+            return;
+        }
+        int result = 1;
+        for (int i = 2; i <= n; i++) {
+            result = result * i;
+        }
+        printf("Factorial lambda: %d\n", result);
+    }(5);
+
+    return 0;
+}

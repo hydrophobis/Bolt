@@ -92,11 +92,6 @@ public class HeaderGen {
             } else {
                 outputFile = baseName + ".h";
             }
-        } else if (!packageDir.isEmpty()) {
-            java.nio.file.Path explicitPath = Paths.get(outputFile);
-            if (explicitPath.getParent() == null || !explicitPath.toString().contains(packageDir + "/")) {
-                outputFile = packageDir + "/" + explicitPath.getFileName().toString();
-            }
         }
 
         // Ensure output directory exists

@@ -6,35 +6,30 @@ import java.util.*;
 public class Config {
     private final Map<String, String> settings = new HashMap<>();
 
+    private static final Map<String, String> DEFAULT_SETTINGS = Map.ofEntries(
+        Map.entry("mangle", "true"),
+        Map.entry("no-heap", "false"),
+        Map.entry("traceability", "false"),
+        Map.entry("indent-size", "4"),
+        Map.entry("indent-style", "space"),
+        Map.entry("brace-style", "k&r"),
+        Map.entry("line-width", "80"),
+        Map.entry("string-buffer-size", "256"),
+        Map.entry("static-string-pool", "false"),
+        Map.entry("c-standard", "c99"),
+        Map.entry("allow-recursion", "true"),
+        Map.entry("forbidden-headers", ""),
+        Map.entry("strict-typing", "true"),
+        Map.entry("lambdas", "false"),
+        Map.entry("max-errors", "10"),
+        Map.entry("mangle-prefix", "__bolt"),
+        Map.entry("no-std-includes", "false"),
+        Map.entry("no-string-helpers", "false"),
+        Map.entry("verbose", "false")
+    );
+
     public Config() {
-        // defaults
-        settings.put("mangle", "true");
-        settings.put("no-heap", "false");
-        settings.put("traceability", "false");
-
-        // code style & formatting
-        settings.put("indent-size", "4");
-        settings.put("indent-style", "space");
-        settings.put("brace-style", "k&r");
-        settings.put("line-width", "80");
-
-        // memory & resource management
-        settings.put("string-buffer-size", "65536");
-        settings.put("static-string-pool", "false");
-
-        // safety & compliance
-        settings.put("c-standard", "c99");
-        settings.put("allow-recursion", "true");
-        settings.put("forbidden-headers", "");
-        settings.put("strict-typing", "false");
-
-        // transpiler behavior & dx
-        settings.put("max-errors", "10");
-        settings.put("mangle-prefix", "__bolt");
-        settings.put("no-std-includes", "false");
-        settings.put("no-string-helpers", "false");
-        settings.put("verbose", "false");
-
+        settings.putAll(DEFAULT_SETTINGS);
         load();
     }
 

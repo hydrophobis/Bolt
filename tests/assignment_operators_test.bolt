@@ -1,0 +1,37 @@
+import stdio;
+
+int main() {
+    int a = 10;
+    int b = 3;
+
+    // Test modulo assignment
+    a %= b;
+    printf("Modulo assignment: 10 %% 3 = %d\n", a);
+
+    // Test bitwise AND assignment
+    a = 12;
+    a &= 7;
+    printf("Bitwise AND assignment: 12 & 7 = %d\n", a);
+
+    // Test bitwise OR assignment
+    a = 5;
+    a |= 3;
+    printf("Bitwise OR assignment: 5 | 3 = %d\n", a);
+
+    // Test bitwise XOR assignment
+    a = 5;
+    a ^= 3;
+    printf("Bitwise XOR assignment: 5 ^ 3 = %d\n", a);
+
+    // Test left shift assignment
+    a = 2;
+    a <<= 2;
+    printf("Left shift assignment: 2 << 2 = %d\n", a);
+
+    // Test right shift assignment
+    a = 16;
+    a >>= 2;
+    printf("Right shift assignment: 16 >> 2 = %d\n", a);
+
+    return 0;
+}

@@ -7,3 +7,8 @@ build
 app/bin
 
 bolt-vscode/node_modules
+
+.vscode
+.idea
+
+./bolt

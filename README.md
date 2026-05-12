@@ -1,37 +1,26 @@
-## Bolt
+## <img src="bolt-vscode\icon.png" style="width: 15px"> <span style="color:#913311;">Bolt</span> <img src="bolt-vscode\icon.png" style="width: 15px">
 C++ abstractions without the debt. A C superset with various abstractions from C++ and Java which transpiles into C.
 
 Note: Bolt is very much in beta, expect bugs
 
-### Compat, building, etc
+### <span style="color:#913311;">Compat, building, etc
 Only tested on Windows, i see no reason it wouldnt work on Linux/MacOS
 
 I use MS Java 21.0.9 for building and running
 
 ---
-### Good first issues
-- generated `string` code is very slow and memory inefficient
-- i believe there's some leftover debug prints
-- LSP: member completion, currently suggests form all functions instead of from that type
-- add support for hex/octal/binary in the tokenizer (0x etc)
-- bitwise + modulo assignment operators are missing
-- document some missing bolt.cfg settings (Just in `Config.java` i think)
-- LSP: cross file goto definition
-- more std library support on includes
+### <span style="color:#913311;">Planned features
+- a better bolt std library
 
-### Planned features
-<small>feel free to make or work on any of these still</small>
-- header file generation 
-- public and private methods
-- interfaces
-- lambdas
-- a bolt std library
+### <span style="color:#913311;">Features
 
-### Features
-
-#### Classes
+#### <span style="color:#913311;">Classes
 
 Classes group fields and methods together. Methods receive an implicit `self` pointer. Use `new` to heap-allocate and `delete` to free. Class methods are private by default, and fields are private by default.
+
+Access modifiers:
+- `public` - accessible from anywhere
+- `private` - accessible only within the class
 
 ```cpp
 import stdio;
@@ -71,7 +60,7 @@ int main() {
 
 ---
 
-#### init / dinit (constructors & destructors)
+#### <span style="color:#913311;">init / dinit (constructors & destructors)
 
 Define `init` and `dinit` methods on a class for automatic construction and destruction. Stack allocated instances have `dinit` called automatically at end of scope.
 
@@ -99,7 +88,7 @@ int main() {
 
 ---
 
-#### impl blocks
+#### <span style="color:#913311;">impl blocks
 
 Add methods to a type outside its original declaration - useful for separating interface from implementation, or extending existing types.
 
@@ -128,7 +117,49 @@ int main() {
 
 ---
 
-#### Generics
+#### <span style="color:#913311;">Interfaces
+
+Define interfaces with method signatures that classes must implement. Supports dynamic dispatch through interface types.
+
+```cpp
+import stdio;
+
+interface Shape {
+    void draw();
+    int getArea();
+}
+
+class Circle implements Shape {
+    int radius;
+
+    public void init(int r) {
+        self.radius = r;
+    }
+
+    public void draw() {
+        printf("Drawing Circle with radius: %d\n", self.radius);
+    }
+
+    public int getArea() {
+        return 3 * self.radius * self.radius;
+    }
+}
+
+void render(Shape s) {
+    s.draw();
+    printf("Area: %d\n", s.getArea());
+}
+
+int main() {
+    Circle c;
+    c.init(5);
+    render(c);
+}
+```
+
+---
+
+#### <span style="color:#913311;">Generics
 
 Classes and functions can be parameterized with type arguments. Bolt treats these the same as C++ templates.
 
@@ -166,7 +197,7 @@ int main() {
 
 ---
 
-#### Operator overloading
+#### <span style="color:#913311;">Operator overloading
 
 Define custom behavior for operators on your types. Unary form: `operator ReturnType Op Arg`. Binary form: `operator ReturnType Left Op Right`.
 
@@ -207,7 +238,24 @@ void __bolt_operator_lnot_Vec2(Vec2 a) { ... }
 
 ---
 
-#### string type
+#### <span style="color:#913311;">Lambdas
+
+Anonymous functions that can capture variables from their enclosing scope.
+
+```cpp
+import stdio;
+
+int main() {
+    int x = 10;
+
+    // Simple lambda
+    printf("5 + 3 = %d\n", fn(int a, int b) { printf("Add lambda: %d\n", a + b); }(5, 3));
+}
+```
+
+---
+
+#### <span style="color:#913311;">string type
 
 `string` is a managed `char*` with built-in concatenation via `+`, `+=`, and value-equality via `==` / `!=`.
 
@@ -235,7 +283,42 @@ string result = "Count: " + count;
 
 ---
 
-#### Packages & imports
+#### <span style="color:#913311;">Number literals
+
+Support for hexadecimal, octal, and binary number literals.
+
+```cpp
+int hex = 0xFF;        // 255
+int octal = 0755;      // 493
+int binary = 0b1010;   // 10
+```
+
+---
+
+#### <span style="color:#913311;">Assignment operators
+
+All compound assignment operators are supported, including bitwise and modulo.
+
+```cpp
+int a = 10;
+int b = 3;
+
+a += 5;    // addition
+a -= 2;    // subtraction
+a *= 3;    // multiplication
+a /= 4;    // division
+a %= b;    // modulo
+
+a &= 7;    // bitwise AND
+a |= 3;    // bitwise OR
+a ^= 5;    // bitwise XOR
+a <<= 2;   // left shift
+a >>= 1;   // right shift
+```
+
+---
+
+#### <span style="color:#913311;">Packages & imports
 
 `package` declares the current module's namespace. `import` maps to a C `#include`. Dot-separated paths map to directory separators.
 
@@ -259,7 +342,7 @@ Standard library shortcuts:
 
 ---
 
-#### Decorators
+#### <span style="color:#913311;">Decorators
 
 Decorators annotate declarations with metadata. Built-in decorators:
 - `@mangle` - (inconsistent currrently) mangles the function name
@@ -277,7 +360,7 @@ void log(string msg);   // log(msg) -> puts(msg)
 
 ---
 
-#### bolt.cfg
+#### <span style="color:#913311;">bolt.cfg
 
 Project-level configuration file. Place `bolt.cfg` in your working directory.
 
@@ -308,4 +391,20 @@ strict-typing=false
 
 # Prefix used for mangled names (default: __bolt)
 mangle-prefix=__bolt
+
+# Code style & formatting
+indent-size=4
+indent-style=space
+brace-style=k&r
+line-width=80
+
+# Memory & resource management
+string-buffer-size=256
+static-string-pool=false
+
+# Transpiler behavior & dx
+max-errors=10
+no-std-includes=false
+no-string-helpers=false
+verbose=false
 ```

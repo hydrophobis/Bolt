@@ -307,6 +307,7 @@ function parseDocument(doc: TextDocument): ParsedDocument {
 // ─── Per-document symbol cache ────────────────────────────────────────────────
 
 const symbolCache = new Map<string, BoltSymbol[]>();
+const importCache = new Map<string, string[]>(); // uri -> list of imported file uris
 
 function getWordAtPosition(doc: TextDocument, pos: Position): string {
   const line = doc.getText(Range.create(pos.line, 0, pos.line, 9999));
@@ -315,6 +316,15 @@ function getWordAtPosition(doc: TextDocument, pos: Position): string {
   while (start > 0 && /\w/.test(line[start - 1])) start--;
   while (end < line.length && /\w/.test(line[end])) end++;
   return line.slice(start, end);
+}
+
+// Build a global symbol table from all open documents
+function getGlobalSymbols(): BoltSymbol[] {
+  const allSymbols: BoltSymbol[] = [];
+  for (const [uri, symbols] of symbolCache) {
+    allSymbols.push(...symbols);
+  }
+  return allSymbols;
 }
 
 // ─── LSP lifecycle ────────────────────────────────────────────────────────────
@@ -333,6 +343,16 @@ connection.onInitialize((_params: InitializeParams): InitializeResult => {
 documents.onDidChangeContent((change) => {
   const parsed = parseDocument(change.document);
   symbolCache.set(change.document.uri, parsed.symbols);
+
+  // Extract imports for cross-file resolution
+  const imports: string[] = [];
+  const text = change.document.getText();
+  const importMatches = text.matchAll(/\bimport\s+([A-Za-z_][A-Za-z0-9_.]*)/g);
+  for (const match of importMatches) {
+    imports.push(match[1]);
+  }
+  importCache.set(change.document.uri, imports);
+
   connection.sendDiagnostics({ uri: change.document.uri, diagnostics: parsed.diagnostics });
 });
 
@@ -377,11 +397,45 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     });
   }
 
-  // If member access, also suggest 'self' members
+  // If member access, try to infer the type and suggest appropriate members
   if (isMemberAccess) {
-    const selfMembers = symbols.filter(s => s.kind === 'field' || s.kind === 'function');
-    for (const m of selfMembers) {
-      items.push({ label: m.name, kind: CompletionItemKind.Field, detail: m.detail });
+    // Get the text before the dot to infer the type
+    const beforeDot = line.substring(0, line.lastIndexOf('.')).trim();
+
+    // Check if it's 'self' - suggest class members
+    if (beforeDot === 'self') {
+      const classMembers = symbols.filter(s => s.kind === 'function' || s.kind === 'field');
+      for (const m of classMembers) {
+        items.push({
+          label: m.name,
+          kind: m.kind === 'function' ? CompletionItemKind.Method : CompletionItemKind.Field,
+          detail: m.detail,
+        });
+      }
+    } else {
+      // Try to find the variable declaration to get its type
+      const varSymbol = symbols.find(s => s.name === beforeDot);
+      if (varSymbol) {
+        // If it's a class/struct type, look for impl blocks
+        const implBlocks = symbols.filter(s => s.kind === 'class' && s.type === 'impl' && s.name === varSymbol.type);
+        for (const impl of implBlocks) {
+          // Find methods/fields in this impl block
+          const implMembers = symbols.filter(s =>
+            s.kind === 'function' &&
+            s.line > impl.line &&
+            (s.line < symbols.find((nextSym, idx) =>
+              nextSym.kind === 'class' && nextSym.type === 'impl' && nextSym.line > impl.line && idx > symbols.indexOf(impl)
+            )?.line || Infinity)
+          );
+          for (const m of implMembers) {
+            items.push({
+              label: m.name,
+              kind: CompletionItemKind.Method,
+              detail: m.detail,
+            });
+          }
+        }
+      }
     }
   }
 
@@ -440,6 +494,19 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
     };
   }
 
+  // Check global symbols
+  const globalSymbols = getGlobalSymbols();
+  const globalSym = globalSymbols.find(s => s.name === word);
+  if (globalSym) {
+    const kindLabel = globalSym.kind.charAt(0).toUpperCase() + globalSym.kind.slice(1);
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: `**${kindLabel}** \`${globalSym.detail ?? globalSym.name}\``,
+      },
+    };
+  }
+
   return null;
 });
 
@@ -452,14 +519,27 @@ connection.onDefinition((params: DefinitionParams): Location | null => {
   const word = getWordAtPosition(doc, params.position);
   if (!word) return null;
 
+  // First check current document
   const symbols = symbolCache.get(params.textDocument.uri) ?? [];
   const sym = symbols.find(s => s.name === word);
-  if (!sym) return null;
+  if (sym) {
+    return Location.create(
+      sym.uri,
+      Range.create(sym.line, sym.col, sym.line, sym.col + sym.name.length)
+    );
+  }
 
-  return Location.create(
-    sym.uri,
-    Range.create(sym.line, sym.col, sym.line, sym.col + sym.name.length)
-  );
+  // If not found in current document, search all open documents
+  const globalSymbols = getGlobalSymbols();
+  const globalSym = globalSymbols.find(s => s.name === word);
+  if (globalSym) {
+    return Location.create(
+      globalSym.uri,
+      Range.create(globalSym.line, globalSym.col, globalSym.line, globalSym.col + globalSym.name.length)
+    );
+  }
+
+  return null;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
