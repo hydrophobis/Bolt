@@ -1920,7 +1920,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
     }
 
     private void emitOperand(ASTNode operand) {
-        if (operand instanceof BinaryExpression) {
+        if (operand instanceof BinaryExpression || operand instanceof UnaryExpression) {
             builder.append("(");
             operand.accept(this);
             builder.append(")");
