@@ -8,6 +8,7 @@ import hydro.bolt.tokens.TokenType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,7 +25,6 @@ import hydro.bolt.template.Template;
 
 // almost 1800 lines of sadness and barely functional code generation
 // Almost no comments either because Im lazy so good luck me
-// held together by the will of Terry Davis
 public class Codegen extends AbstractASTVisitor<String> {
     public StringBuilder builder = new StringBuilder();
     public ASTTree tree;
@@ -46,10 +46,13 @@ public class Codegen extends AbstractASTVisitor<String> {
     private String currentOperatorName = null;
     private int indentLevel = 0;
     private String currentFunctionName = null;
+    private String currentFunctionReturnType = null;
     private int recursionDepth = 0;
     private List<LambdaExpression> lambdaFunctions = new ArrayList<>();
     private Map<String, String> lambdaSignatures = new HashMap<>();
     private String cachedIndent = "";
+    private final Map<String, String> stringPool = new LinkedHashMap<>();
+    private boolean generatingHeader = false;
 
     public String generate() {
         currentScope = symbols;
@@ -165,6 +168,12 @@ public class Codegen extends AbstractASTVisitor<String> {
             builder.append("}\n\n");
         }
 
+        for (ASTNode node : tree) {
+            if (isTypeDeclaration(node)) {
+                node.accept(this);
+            }
+        }
+
         generateForwardDeclarations();
 
         for (ASTNode node : tree) {
@@ -189,6 +198,7 @@ public class Codegen extends AbstractASTVisitor<String> {
         }
 
         for (ASTNode node : tree) {
+            if (isTypeDeclaration(node)) continue;
             node.accept(this);
         }
 
@@ -238,10 +248,33 @@ public class Codegen extends AbstractASTVisitor<String> {
             finalBuilder.append(builder);
         }
 
-        return finalBuilder.toString();
+        String output = finalBuilder.toString();
+        output = insertStringPool(output);
+        return hydro.bolt.format.LineWrapper.wrap(
+            output, Integer.parseInt(config.get("line-width")), oneIndent());
+    }
+
+    private String oneIndent() {
+        int size = Integer.parseInt(config.get("indent-size"));
+        return config.get("indent-style").equals("tab") ? "\t" : " ".repeat(size);
+    }
+
+    private String insertStringPool(String output) {
+        if (stringPool.isEmpty()) return output;
+
+        StringBuilder pool = new StringBuilder();
+        pool.append("/* pooled string literals */\n");
+        for (Map.Entry<String, String> entry : stringPool.entrySet()) {
+            pool.append("static const char ").append(entry.getValue())
+                .append("[] = ").append(entry.getKey()).append(";\n");
+        }
+        pool.append("\n");
+
+        return pool + output;
     }
 
     public String generateHeader() {
+        generatingHeader = true;
         currentScope = symbols;
         builder.setLength(0);
         genericBuilder.setLength(0);
@@ -365,7 +398,15 @@ public class Codegen extends AbstractASTVisitor<String> {
 
     private void generateSignature(FunctionDeclaration func, String className, boolean isClass, String customName) {
         if (hasDecorator(func, "inline")) {
-            builder.append("static inline ");
+            if (supportsInline()) {
+                builder.append("static inline ");
+            } else {
+                reporter.warn(hydro.bolt.parser.ErrorCode.UNSUPPORTED_C_STANDARD,
+                    func.line, func.column, func.name.length(),
+                    "@inline ignored: 'inline' requires C99 or later, but c-standard is "
+                        + config.get("c-standard"));
+                builder.append("static ");
+            }
         }
 
         boolean isLifecycle = className != null && !className.isEmpty() && (func.name.equals("init") || func.name.equals("dinit"));
@@ -417,15 +458,48 @@ public class Codegen extends AbstractASTVisitor<String> {
 
         if (func.parameters != null) {
             for (int i = 0; i < func.parameters.size(); i++) {
-                Parameter param = func.parameters.get(i);
-                param.type.accept(this);
-                builder.append(" ").append(param.name);
+                emitParameter(func.parameters.get(i));
                 if (i < func.parameters.size() - 1) {
                     builder.append(", ");
                 }
             }
         }
         builder.append(")");
+    }
+
+    private void emitParameter(Parameter param) {
+        if (param.type instanceof FunctionType fnType) {
+            fnType.returnType.accept(this);
+            builder.append(" (*").append(param.name).append(")(");
+            if (fnType.parameterTypes == null || fnType.parameterTypes.isEmpty()) {
+                builder.append("void");
+            } else {
+                for (int i = 0; i < fnType.parameterTypes.size(); i++) {
+                    fnType.parameterTypes.get(i).accept(this);
+                    if (i < fnType.parameterTypes.size() - 1) builder.append(", ");
+                }
+            }
+            builder.append(")");
+            return;
+        }
+
+        param.type.accept(this);
+        builder.append(" ").append(param.name);
+        emitArrayBrackets(param.type);
+    }
+
+    @Override
+    public String visitFunctionType(FunctionType node) {
+        node.returnType.accept(this);
+        builder.append(" (*)(");
+        if (node.parameterTypes != null) {
+            for (int i = 0; i < node.parameterTypes.size(); i++) {
+                node.parameterTypes.get(i).accept(this);
+                if (i < node.parameterTypes.size() - 1) builder.append(", ");
+            }
+        }
+        builder.append(")");
+        return null;
     }
 
     private static final Map<String, String> OPERATOR_NAMES = Map.ofEntries(
@@ -533,9 +607,6 @@ public class Codegen extends AbstractASTVisitor<String> {
        String t1 = resolveType(bin.left);
        String t2 = resolveType(bin.right);
        if ("string".equals(t1) || "string".equals(t2)) {
-            if (bin.operator.equals("+") && config.getBoolean("no-heap")) {
-                reporter.report(new Token(TokenType.PLUS, "+", bin.line, bin.column, 0), "String concatenation is forbidden in no-heap mode");
-            }
             return "string";
        }
        
@@ -645,6 +716,34 @@ public class Codegen extends AbstractASTVisitor<String> {
         cachedIndent = indentChar.repeat(indentLevel * size);
     }
 
+    private boolean supportsInline() {
+        String std = config.get("c-standard");
+        return !("c89".equalsIgnoreCase(std) || "c90".equalsIgnoreCase(std));
+    }
+
+    private boolean isTypeDeclaration(ASTNode node) {
+        return node instanceof EnumDeclaration || node instanceof UnionDeclaration
+            || node instanceof StructDeclaration || node instanceof TypedefDeclaration;
+    }
+
+    private boolean isClassType(String type) {
+        if (type == null) return false;
+        Symbol sym = symbols.get(resolveTypeName(stripGeneric(type)));
+        if (sym == null) sym = symbols.get(stripGeneric(type));
+        return sym != null && sym.kind == Symbol.Kind.CLASS;
+    }
+
+    private void emitAsValue(ASTNode expr) {
+        String type = resolveType(expr);
+        if (type != null && type.endsWith("*") && isClassType(stripPointer(type))) {
+            builder.append("(*");
+            expr.accept(this);
+            builder.append(")");
+        } else {
+            expr.accept(this);
+        }
+    }
+
     private boolean isStringType(String type) {
         return "string".equals(type);
     }
@@ -693,6 +792,25 @@ public class Codegen extends AbstractASTVisitor<String> {
         Map.entry("void", "v")
     );
 
+    private String poolStringLiteral(String content) {
+        if (generatingHeader) return null;
+        if (!config.getBoolean("static-string-pool")) return null;
+        if (content == null) return null;
+
+        String text = content.trim();
+        if (text.length() < 2 || !text.startsWith("\"") || !text.endsWith("\"")) return null;
+        for (int i = 1; i < text.length() - 1; i++) {
+            if (text.charAt(i) == '\\') {
+                i++;
+            } else if (text.charAt(i) == '"') {
+                return null;
+            }
+        }
+
+        return stringPool.computeIfAbsent(text,
+            k -> config.get("mangle-prefix") + "_str_" + stringPool.size());
+    }
+
     private String getMangledType(String type) {
         if (type == null) return "v";
         type = stripPointer(type);
@@ -701,8 +819,122 @@ public class Codegen extends AbstractASTVisitor<String> {
         return type.length() + toCName(type);
     }
 
+    @Override
+    public String visitTernaryExpression(TernaryExpression node) {
+        builder.append("(");
+        node.condition.accept(this);
+        builder.append(" ? ");
+        node.trueExpression.accept(this);
+        builder.append(" : ");
+        node.falseExpression.accept(this);
+        builder.append(")");
+        return null;
+    }
+
+    @Override
+    public String visitPointerMemberAccess(PointerMemberAccess node) {
+        node.pointer.accept(this);
+        builder.append("->").append(node.member);
+        return null;
+    }
+
+    @Override
+    public String visitEnumDeclaration(EnumDeclaration node) {
+        builder.append("typedef enum ").append(toCName(node.name)).append(getBraceStart()).append("\n");
+        indent();
+        if (node.members != null) {
+            for (int i = 0; i < node.members.size(); i++) {
+                EnumMember member = node.members.get(i);
+                emitIndent();
+                builder.append(member.name);
+                if (member.value != null) {
+                    builder.append(" = ");
+                    member.value.accept(this);
+                }
+                if (i < node.members.size() - 1) builder.append(",");
+                builder.append("\n");
+            }
+        }
+        outdent();
+        builder.append("} ").append(toCName(node.name)).append(";\n\n");
+        return null;
+    }
+
+    @Override
+    public String visitUnionDeclaration(UnionDeclaration node) {
+        builder.append("typedef union ").append(toCName(node.name)).append(getBraceStart()).append("\n");
+        indent();
+        emitAggregateMembers(node.members);
+        outdent();
+        builder.append("} ").append(toCName(node.name)).append(";\n\n");
+        return null;
+    }
+
+    @Override
+    public String visitStructDeclaration(StructDeclaration node) {
+        builder.append("typedef struct ").append(toCName(node.name)).append(getBraceStart()).append("\n");
+        indent();
+        emitAggregateMembers(node.members);
+        outdent();
+        builder.append("} ").append(toCName(node.name)).append(";\n\n");
+        return null;
+    }
+
+    private void emitAggregateMembers(List<StructMember> members) {
+        if (members == null) return;
+        for (StructMember member : members) {
+            emitIndent();
+            member.type.accept(this);
+            builder.append(" ").append(member.name);
+            emitArrayBrackets(member.type);
+            builder.append(";\n");
+        }
+    }
+
+    @Override
+    public String visitTypedefDeclaration(TypedefDeclaration node) {
+        builder.append("typedef ");
+        node.type.accept(this);
+        builder.append(" ").append(toCName(node.name));
+        emitArrayBrackets(node.type);
+        builder.append(";\n\n");
+        return null;
+    }
+
+    @Override
+    public String visitEnumMember(EnumMember node) {
+        builder.append(node.name);
+        return null;
+    }
+
+    @Override
+    public String visitIntegerLiteral(IntegerLiteral node) {
+        builder.append(node.value);
+        return "int";
+    }
+
+    @Override
+    public String visitFloatLiteral(FloatLiteral node) {
+        builder.append(node.value);
+        return "float";
+    }
+
+    @Override
+    public String visitCharLiteral(CharLiteral node) {
+        builder.append(node.value);
+        return "char";
+    }
+
+    @Override
+    public String visitStringLiteral(StringLiteral node) {
+        String pooled = poolStringLiteral(node.value);
+        builder.append(pooled != null ? pooled : node.value);
+        return "string";
+    }
+
     public String visitRawCNode(RawCNode node) {
-        builder.append(node.content);
+        String pooled = poolStringLiteral(node.content);
+        builder.append(pooled != null ? pooled : node.content);
         // if content looks like struct definition but missing semicolon, add it.
         // also handle "struct Point { ... }" where the closing brace might be followed by spaces
         if (node.content.trim().startsWith("struct") && node.content.trim().endsWith("}")) {
@@ -873,10 +1105,227 @@ public class Codegen extends AbstractASTVisitor<String> {
     @Override
     public String visitSwitchStatement(SwitchStatement node) {
         emitTrace(node);
+        emitIndent();
         builder.append("switch (");
         node.expression.accept(this);
-        builder.append(") ");
-        node.body.accept(this);
+        builder.append(")").append(getBraceStart()).append("\n");
+        indent();
+        if (node.body instanceof Block block && block.statements != null) {
+            for (ASTNode section : block.statements) {
+                section.accept(this);
+            }
+        } else if (node.body != null) {
+            node.body.accept(this);
+        }
+        outdent();
+        emitIndent();
+        builder.append("}\n");
+        return null;
+    }
+
+    @Override
+    public String visitCaseStatement(CaseStatement node) {
+        emitIndent();
+        builder.append("case ");
+        node.value.accept(this);
+        builder.append(":\n");
+        indent();
+        emitStatements(node.statements);
+        outdent();
+        return null;
+    }
+
+    @Override
+    public String visitDefaultStatement(DefaultStatement node) {
+        emitIndent();
+        builder.append("default:\n");
+        indent();
+        emitStatements(node.statements);
+        outdent();
+        return null;
+    }
+
+    private void emitStatements(List<ASTNode> statements) {
+        if (statements == null) return;
+        for (ASTNode stmt : statements) {
+            emitStatement(stmt);
+        }
+    }
+
+    private void emitStatement(ASTNode stmt) {
+        if (stmt == null) return;
+        if (isSelfDelimiting(stmt)) {
+            stmt.accept(this);
+            return;
+        }
+        emitIndent();
+        stmt.accept(this);
+        builder.append(";\n");
+    }
+
+    private boolean isSelfDelimiting(ASTNode stmt) {
+        return stmt instanceof Block || stmt instanceof IfStatement
+            || stmt instanceof WhileStatement || stmt instanceof ForStatement
+            || stmt instanceof DoWhileStatement || stmt instanceof SwitchStatement
+            || stmt instanceof CaseStatement || stmt instanceof DefaultStatement
+            || stmt instanceof BreakStatement || stmt instanceof ContinueStatement
+            || stmt instanceof GotoStatement || stmt instanceof LabeledStatement
+            || stmt instanceof ReturnStatement || stmt instanceof VariableDeclaration
+            || stmt instanceof RawCNode;
+    }
+
+    @Override
+    public String visitForStatement(ForStatement node) {
+        emitTrace(node);
+        SymbolTree oldScope = currentScope;
+        currentScope = new SymbolTree(oldScope);
+
+        StringBuilder header = new StringBuilder();
+        StringBuilder oldBuilder = builder;
+
+        builder = header;
+        header.append("for (");
+        emitForInitializer(node.initializer);
+        header.append("; ");
+        if (node.condition != null) node.condition.accept(this);
+        header.append("; ");
+        emitForUpdate(node.update);
+        header.append(")");
+        builder = oldBuilder;
+
+        emitIndent();
+        builder.append(header).append(getBraceStart()).append("\n");
+        indent();
+        if (node.body instanceof Block block) {
+            emitStatements(block.statements);
+        } else {
+            emitStatement(node.body);
+        }
+        outdent();
+        emitIndent();
+        builder.append("}\n");
+
+        currentScope = oldScope;
+        return null;
+    }
+
+    private void emitForInitializer(ASTNode initializer) {
+        if (initializer == null) return;
+
+        if (initializer instanceof Block block && block.statements != null) {
+            for (int i = 0; i < block.statements.size(); i++) {
+                ASTNode part = block.statements.get(i);
+                if (i > 0) builder.append(", ");
+                if (part instanceof VariableDeclaration vd) {
+                    if (i == 0) {
+                        emitForDeclaration(vd);
+                    } else {
+                        emitForDeclarator(vd);
+                    }
+                } else {
+                    part.accept(this);
+                }
+            }
+            return;
+        }
+
+        if (initializer instanceof VariableDeclaration vd) {
+            emitForDeclaration(vd);
+        } else if (initializer instanceof ExpressionStatement es) {
+            es.expression.accept(this);
+        } else {
+            initializer.accept(this);
+        }
+    }
+
+    private void emitForUpdate(ASTNode update) {
+        if (update == null) return;
+
+        if (update instanceof Block block && block.statements != null) {
+            for (int i = 0; i < block.statements.size(); i++) {
+                if (i > 0) builder.append(", ");
+                block.statements.get(i).accept(this);
+            }
+            return;
+        }
+        update.accept(this);
+    }
+
+    private void emitForDeclarator(VariableDeclaration vd) {
+        Symbol sym = new Symbol(vd.name, Symbol.Kind.VARIABLE, getBaseTypeName(vd.type));
+        sym.isPointer = vd.type instanceof PointerType;
+        currentScope.put(vd.name, sym);
+
+        builder.append(vd.name);
+        if (vd.initializer != null) {
+            builder.append(" = ");
+            vd.initializer.accept(this);
+        }
+    }
+
+    private void emitForDeclaration(VariableDeclaration vd) {
+        String baseType = getBaseTypeName(vd.type);
+        Symbol sym = new Symbol(vd.name, Symbol.Kind.VARIABLE, baseType);
+        sym.isPointer = vd.type instanceof PointerType;
+        currentScope.put(vd.name, sym);
+
+        vd.type.accept(this);
+        builder.append(" ").append(vd.name);
+        if (vd.initializer != null) {
+            builder.append(" = ");
+            vd.initializer.accept(this);
+        }
+    }
+
+    @Override
+    public String visitDoWhileStatement(DoWhileStatement node) {
+        emitTrace(node);
+        emitIndent();
+        builder.append("do").append(getBraceStart()).append("\n");
+        indent();
+        if (node.body instanceof Block block) {
+            emitStatements(block.statements);
+        } else {
+            emitStatement(node.body);
+        }
+        outdent();
+        emitIndent();
+        builder.append("} while (");
+        node.condition.accept(this);
+        builder.append(");\n");
+        return null;
+    }
+
+    @Override
+    public String visitBreakStatement(BreakStatement node) {
+        emitIndent();
+        builder.append("break;\n");
+        return null;
+    }
+
+    @Override
+    public String visitContinueStatement(ContinueStatement node) {
+        emitIndent();
+        builder.append("continue;\n");
+        return null;
+    }
+
+    @Override
+    public String visitGotoStatement(GotoStatement node) {
+        emitIndent();
+        builder.append("goto ").append(node.label).append(";\n");
+        return null;
+    }
+
+    @Override
+    public String visitLabeledStatement(LabeledStatement node) {
+        builder.append(node.label).append(":\n");
+        if (node.statement != null) {
+            emitStatement(node.statement);
+        } else {
+            emitIndent();
+            builder.append(";\n");
+        }
         return null;
     }
 
@@ -1129,13 +1578,11 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
     @Override
     public String visit(NewExpression node) {
-        if (config.getBoolean("no-heap")) {
-            reporter.report(new Token(TokenType.KEYWORD, "new", node.line, node.column, 0), "Use of 'new' is forbidden in no-heap mode");
-        }
         String fullTypeName = resolveTypeName(node.typeName);
-        String cTypeName = toCName(fullTypeName);
+        String cTypeName = mangleGenericTypeName(fullTypeName);
 
         Symbol classSym = symbols.get(fullTypeName);
+        if (classSym == null) classSym = symbols.get(resolveTypeName(stripGeneric(node.typeName)));
         if (classSym != null && classSym.members.containsKey("init")) {
             List<String> argTypes = new ArrayList<>();
             if (node.arguments != null) {
@@ -1159,23 +1606,40 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
     @Override
     public String visit(DeleteExpression node) {
-        if (config.getBoolean("no-heap")) {
-            reporter.report(new Token(TokenType.KEYWORD, "delete", node.line, node.column, 0), "Use of 'delete' is forbidden in no-heap mode");
-        }
         String type = "unknown";
+        boolean isPointer = false;
         if (node.target instanceof Identifier id) {
             Symbol sym = currentScope.get(id.name);
-            if (sym != null) type = sym.typeName;
+            if (sym != null) {
+                type = sym.typeName;
+                isPointer = sym.isPointer;
+            }
         } else if (node.target instanceof MemberAccess ma) {
             type = resolveType(ma);
         } else {
             type = resolveType(node.target);
         }
+        isPointer = isPointer || (type != null && type.endsWith("*"));
 
-        Symbol classSym = symbols.get(stripPointer(type));
-        if (classSym != null && classSym.members.containsKey("dinit")) {
-            String methodName = toCName(stripPointer(type)) + "_dinit";
-            builder.append("free(").append(methodName).append("((").append(toCName(stripPointer(type))).append("*)");
+        String baseType = stripPointer(type);
+        Symbol classSym = symbols.get(baseType);
+        boolean hasDinit = classSym != null && classSym.members.containsKey("dinit");
+
+        if (!isPointer) {
+            if (hasDinit) {
+                builder.append(dinitName(baseType)).append("(&");
+                node.target.accept(this);
+                builder.append(")");
+                markDeleted(node.target);
+            } else {
+                builder.append("(void)0");
+            }
+            return null;
+        }
+
+        if (hasDinit) {
+            String methodName = dinitName(baseType);
+            builder.append("free(").append(methodName).append("((").append(toCName(baseType)).append("*)");
             node.target.accept(this);
             builder.append("))");
         } else {
@@ -1187,9 +1651,50 @@ public String visitExpressionStatement(ExpressionStatement node) {
         return null;
     }
 
+    private void emitInPlaceConstruction(NewExpression node) {
+        String fullTypeName = resolveTypeName(node.typeName);
+        String cTypeName = mangleGenericTypeName(fullTypeName);
+
+        Symbol classSym = symbols.get(fullTypeName);
+        if (classSym == null) classSym = symbols.get(resolveTypeName(stripGeneric(node.typeName)));
+
+        if (classSym == null || !classSym.members.containsKey("init")) {
+            builder.append("(").append(cTypeName).append("){0}");
+            return;
+        }
+
+        List<String> argTypes = new ArrayList<>();
+        if (node.arguments != null) {
+            for (ASTNode arg : node.arguments) argTypes.add(resolveType(arg));
+        }
+
+        builder.append("*").append(mangleIdentifier("init", argTypes, fullTypeName))
+               .append("(&(").append(cTypeName).append("){0}");
+        if (node.arguments != null) {
+            for (ASTNode arg : node.arguments) {
+                builder.append(", ");
+                arg.accept(this);
+            }
+        }
+        builder.append(")");
+    }
+
+    private String dinitName(String typeName) {
+        return config.getBoolean("mangle")
+            ? mangleIdentifier("dinit", new ArrayList<>(), typeName)
+            : toCName(typeName) + "_dinit";
+    }
+
+    private void markDeleted(ASTNode target) {
+        if (target instanceof Identifier id) {
+            allActiveInstances.remove(id.name);
+        }
+    }
+
     private static final Map<String, String> STD_LIBS = Map.ofEntries(
         Map.entry("std.io", "stdio.h"),
         Map.entry("io", "stdio.h"),
+        Map.entry("stdio", "stdio.h"),
         Map.entry("std.stdlib", "stdlib.h"),
         Map.entry("stdlib", "stdlib.h"),
         Map.entry("std.math", "math.h"),
@@ -1240,8 +1745,11 @@ public String visitExpressionStatement(ExpressionStatement node) {
         currentScope.put("a", symA);
         
         String prevOp = currentOperatorName;
+        String prevReturn = currentFunctionReturnType;
         currentOperatorName = opName;
+        currentFunctionReturnType = node.returnType.name;
         node.code.accept(this);
+        currentFunctionReturnType = prevReturn;
         currentOperatorName = prevOp;
         
         builder.append("\n");
@@ -1262,10 +1770,13 @@ public String visitExpressionStatement(ExpressionStatement node) {
         currentScope.put("b", symB);
         
         String prevOp = currentOperatorName;
+        String prevReturn = currentFunctionReturnType;
         currentOperatorName = opName;
+        currentFunctionReturnType = node.returnType.name;
         node.code.accept(this);
+        currentFunctionReturnType = prevReturn;
         currentOperatorName = prevOp;
-        
+
         builder.append("\n");
         return null;
     }
@@ -1396,20 +1907,31 @@ public String visitExpressionStatement(ExpressionStatement node) {
         }
 
         // handle operator overloads
-        String opName = "__bolt_operator_" + operatorToName(node.operator) + "_" + toCName(t1) + "_" + toCName(t2);
+        String opName = "__bolt_operator_" + operatorToName(node.operator) + "_"
+            + toCName(stripPointer(t1)) + "_" + toCName(stripPointer(t2));
         if (symbols.contains(opName) && !opName.equals(currentOperatorName)) {
             builder.append(opName).append("(");
-            node.left.accept(this);
+            emitAsValue(node.left);
             builder.append(", ");
-            node.right.accept(this);
+            emitAsValue(node.right);
             builder.append(")");
         } else {
             // standard C operator fallback
-            node.left.accept(this);
+            emitOperand(node.left);
             builder.append(" ").append(node.operator).append(" ");
-            node.right.accept(this);
+            emitOperand(node.right);
         }
         return null;
+    }
+
+    private void emitOperand(ASTNode operand) {
+        if (operand instanceof BinaryExpression) {
+            builder.append("(");
+            operand.accept(this);
+            builder.append(")");
+        } else {
+            operand.accept(this);
+        }
     }
 
     @Override
@@ -1500,12 +2022,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
             } else {
                 builder.append(toCName(typeName)).append("_").append(ma.member);
             }
-            
-            // Recursion check
-            if (!config.getBoolean("allow-recursion") && ma.member.equals(currentFunctionName)) {
-                reporter.report(new Token(TokenType.IDENTIFIER, ma.member, node.line, node.column, 0), 
-                    "Recursion is forbidden by configuration");
-            }
 
             builder.append("(");
 
@@ -1557,7 +2073,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
                 builder.append(")");
                 return null; // complete call already built, do not fall through to arg emission block below
             } else if (mangle) {
-                builder.append(mangleIdentifier(id.name, argTypes, null));
+                builder.append(mangleIdentifier(id.name, declaredParamTypes(id.name, argTypes), null));
             } else {
                 boolean hasNonStdImport = imports.stream().anyMatch(imp -> !imp.startsWith("std."));
                 if (sym == null && hasNonStdImport) {
@@ -1566,16 +2082,13 @@ public String visitExpressionStatement(ExpressionStatement node) {
                     builder.append(mangleGlobalName(id.name));
                 }
             }
-            
-            if (!config.getBoolean("allow-recursion") && id.name.equals(currentFunctionName)) {
-                reporter.report(new Token(TokenType.IDENTIFIER, id.name, node.line, node.column, 0), 
-                    "Recursion is forbidden by configuration");
-            }
 
             builder.append("(");
             if (node.arguments != null) {
+                List<String> declared = declaredParamTypes(id.name, argTypes);
                 for (int i = 0; i < node.arguments.size(); i++) {
-                    node.arguments.get(i).accept(this);
+                    emitArgument(node.arguments.get(i),
+                        i < declared.size() ? declared.get(i) : null);
                     if (i < node.arguments.size() - 1) {
                         builder.append(", ");
                     }
@@ -1583,9 +2096,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
             }
             builder.append(")");
         } else if (node.function instanceof LambdaExpression) {
-            if (!config.getBoolean("lambdas")) {
-                reporter.report(new Token(TokenType.KEYWORD, "lambda", node.line, node.column, 0), "Lambdas are forbidden by configuration");
-            }
             // Lambda function call: emit the lambda name and arguments
             node.function.accept(this);
             builder.append("(");
@@ -1617,17 +2127,54 @@ public String visitExpressionStatement(ExpressionStatement node) {
     @Override
     public String visitUnaryExpression(UnaryExpression node) {
         String type = resolveType(node.operand);
-        String opName = "__bolt_operator_" + operatorToName(node.operator) + "_" + toCName(type);
+        String opName = "__bolt_operator_" + operatorToName(node.operator) + "_"
+            + toCName(stripPointer(type));
 
         if (symbols.contains(opName) && !opName.equals(currentOperatorName)) {
             builder.append(opName).append("(");
-            node.operand.accept(this);
+            emitAsValue(node.operand);
             builder.append(")");
         } else {
             builder.append(node.operator);
-            node.operand.accept(this);
+            emitOperand(node.operand);
         }
         return null;
+    }
+
+    private ASTNode findReturnedValue(ASTNode node) {
+        if (node == null) return null;
+        if (node instanceof ReturnStatement ret) return ret.value;
+        if (node instanceof Block block && block.statements != null) {
+            for (ASTNode stmt : block.statements) {
+                ASTNode found = findReturnedValue(stmt);
+                if (found != null) return found;
+            }
+        }
+        if (node instanceof IfStatement is) {
+            ASTNode found = findReturnedValue(is.thenBranch);
+            return found != null ? found : findReturnedValue(is.elseBranch);
+        }
+        if (node instanceof WhileStatement ws) return findReturnedValue(ws.body);
+        return null;
+    }
+
+    private String resolveInLambdaScope(LambdaExpression lambda, ASTNode expr) {
+        SymbolTree oldScope = currentScope;
+        currentScope = new SymbolTree(oldScope);
+        for (Parameter p : lambda.parameters) {
+            currentScope.put(p.name, new Symbol(p.name, Symbol.Kind.VARIABLE, getBaseTypeName(p.type)));
+        }
+        try {
+            return resolveType(expr);
+        } finally {
+            currentScope = oldScope;
+        }
+    }
+
+    private String toCType(String type, String fallback) {
+        if (type == null || type.equals("unknown")) return fallback;
+        if (isStringType(type)) return "char*";
+        return toCName(type);
     }
 
     @Override
@@ -1645,17 +2192,13 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
             // Determine return type from body
             String returnType = "void";
-            if (node.body instanceof Block) {
-                // Check if the block has a return statement
-                // For simplicity, we'll use void for now
-            } else {
-                // Single expression - use its type
-                returnType = resolveType(node.body);
-                if (returnType.equals("unknown")) {
-                    returnType = "__auto_type";
-                } else {
-                    returnType = toCName(returnType);
+            if (node.body instanceof Block block) {
+                ASTNode returned = findReturnedValue(block);
+                if (returned != null) {
+                    returnType = toCType(resolveInLambdaScope(node, returned), "void");
                 }
+            } else {
+                returnType = toCType(resolveInLambdaScope(node, node.body), "__auto_type");
             }
 
             sig.append(returnType).append(" ").append("__bolt_lambda_" + lambdaIndex).append("(");
@@ -1697,7 +2240,11 @@ public String visitExpressionStatement(ExpressionStatement node) {
         if (node.value != null) {
             StringBuilder oldBuilder = builder;
             builder = exprBuf;
-            node.value.accept(this);
+            if (isClassType(currentFunctionReturnType)) {
+                emitAsValue(node.value);
+            } else {
+                node.value.accept(this);
+            }
             builder = oldBuilder;
             exprCode = exprBuf.toString();
         }
@@ -1788,10 +2335,6 @@ public String visitExpressionStatement(ExpressionStatement node) {
         emitTrace(node);
         String baseType = getBaseTypeName(node.type);
 
-        if (config.getBoolean("no-heap") && isStringType(baseType)) {
-             reporter.report(new Token(TokenType.IDENTIFIER, node.name, node.line, node.column, 0), "Managed 'string' is forbidden in no-heap mode. Use 'char*' for raw buffers.");
-        }
-
         Symbol sym = new Symbol(node.name, Symbol.Kind.VARIABLE, baseType);
         sym.isManual = hasDecorator(node, "manual");
         sym.isPointer = (node.type instanceof PointerType);
@@ -1813,6 +2356,9 @@ public String visitExpressionStatement(ExpressionStatement node) {
                 builder.append("__bolt_string_copy(");
                 node.initializer.accept(this);
                 builder.append(")");
+            } else if (node.initializer instanceof NewExpression ne
+                    && !(node.type instanceof PointerType) && isClassType(baseType)) {
+                emitInPlaceConstruction(ne);
             } else {
                 node.initializer.accept(this);
             }
@@ -1853,7 +2399,8 @@ public String visitExpressionStatement(ExpressionStatement node) {
         Symbol classSym = symbols.get(baseType);
         if (isStringType(baseType)) {
             allActiveInstances.add(node.name);
-        } else if (classSym != null && classSym.kind == Symbol.Kind.CLASS && !(node.type instanceof PointerType)) {
+        } else if (classSym != null && classSym.kind == Symbol.Kind.CLASS
+                && !(node.type instanceof PointerType)) {
             allActiveInstances.add(node.name);
             if (node.initializer == null && classSym.members.containsKey("init")) {
                 Symbol initSym = classSym.members.get("init");
@@ -1917,8 +2464,97 @@ public String visitExpressionStatement(ExpressionStatement node) {
             return mangledName;
         }
 
+        String asFunction = functionReferenceName(node.name);
+        if (asFunction != null) {
+            builder.append(asFunction);
+            return node.name;
+        }
+
         builder.append(node.name);
         return node.name;
+    }
+
+    private String functionReferenceName(String name) {
+        if (currentScope != null) {
+            Symbol existing = currentScope.get(name);
+            if (existing != null && existing.kind == Symbol.Kind.VARIABLE) return null;
+        }
+
+        for (ASTNode treeNode : tree) {
+            if (!(treeNode instanceof FunctionDeclaration fd) || !fd.name.equals(name)) continue;
+            if (!fd.genericParams.isEmpty()) return null;
+
+            List<String> paramTypes = new ArrayList<>();
+            if (fd.parameters != null) {
+                for (Parameter p : fd.parameters) {
+                    paramTypes.add(getBaseTypeName(p.type));
+                }
+            }
+            return shouldMangle(fd)
+                ? mangleIdentifier(name, paramTypes, null)
+                : mangleGlobalName(name);
+        }
+        return null;
+    }
+
+    private void emitArgument(ASTNode arg, String declaredType) {
+        Symbol declaredSym = declaredType != null ? symbols.get(resolveTypeName(declaredType)) : null;
+        if (declaredSym == null || declaredSym.kind != Symbol.Kind.INTERFACE) {
+            arg.accept(this);
+            return;
+        }
+
+        String argType = resolveType(arg);
+        String argBase = stripPointer(argType);
+        Symbol argSym = symbols.get(resolveTypeName(argBase));
+        if (argSym == null || argSym.kind != Symbol.Kind.CLASS) {
+            arg.accept(this);
+            return;
+        }
+
+        builder.append("(").append(toCName(declaredType)).append("){ .obj = ");
+        if (argType == null || !argType.endsWith("*")) builder.append("&");
+        arg.accept(this);
+        builder.append(", .vtable = &__bolt_vtable_").append(toCName(argBase))
+               .append("_").append(toCName(declaredType)).append(" }");
+    }
+
+    private List<String> declaredParamTypes(String name, List<String> argTypes) {
+        FunctionDeclaration arityMatch = null;
+        for (ASTNode treeNode : tree) {
+            if (!(treeNode instanceof FunctionDeclaration fd) || !fd.name.equals(name)) continue;
+            int count = fd.parameters == null ? 0 : fd.parameters.size();
+            if (count != argTypes.size()) continue;
+
+            List<String> declared = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                declared.add(getBaseTypeName(fd.parameters.get(i).type));
+            }
+            if (declared.equals(argTypes)) return declared;
+            if (arityMatch == null) arityMatch = fd;
+        }
+
+        if (arityMatch != null) {
+            List<String> declared = new ArrayList<>();
+            for (Parameter p : arityMatch.parameters) {
+                declared.add(getBaseTypeName(p.type));
+            }
+            return declared;
+        }
+        return argTypes;
+    }
+
+    private String mangleGenericTypeName(String type) {
+        if (type == null) return "unknown";
+        int angle = type.indexOf('<');
+        int close = type.lastIndexOf('>');
+        if (angle == -1 || close < angle) return toCName(type);
+
+        StringBuilder sb = new StringBuilder(toCName(type.substring(0, angle).trim()));
+        for (String arg : type.substring(angle + 1, close).split(",")) {
+            sb.append("_").append(toCName(arg.trim()));
+        }
+        return sb.toString();
     }
 
     private String getMangledGenericName(Identifier node) {
@@ -1981,7 +2617,10 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
     private void generateFunctionBody(FunctionDeclaration node, String className, boolean isClass) {
         String oldFunc = currentFunctionName;
+        String oldReturnType = currentFunctionReturnType;
         currentFunctionName = node.name;
+        currentFunctionReturnType = node.returnType != null ? getBaseTypeName(node.returnType) : null;
+        if (node.returnType instanceof PointerType) currentFunctionReturnType = null;
 
         String bindTarget = null;
         for (DecoratorNode dec : node.decorators) {
@@ -2008,6 +2647,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
             emitIndent();
             builder.append("}\n");
             currentFunctionName = oldFunc;
+            currentFunctionReturnType = oldReturnType;
             return;
         }
 
@@ -2079,6 +2719,7 @@ public String visitExpressionStatement(ExpressionStatement node) {
         }
         currentGenericParams = oldGenericParams;
         currentFunctionName = oldFunc;
+        currentFunctionReturnType = oldReturnType;
     }
 
     @Override
@@ -2117,17 +2758,13 @@ public String visitExpressionStatement(ExpressionStatement node) {
 
             // Determine return type from body
             String returnType = "void";
-            if (lambda.body instanceof Block) {
-                // Check if the block has a return statement
-                // For simplicity, we'll use void for now
-            } else {
-                // Single expression - use its type
-                returnType = resolveType(lambda.body);
-                if (returnType.equals("unknown")) {
-                    returnType = "__auto_type";
-                } else {
-                    returnType = toCName(returnType);
+            if (lambda.body instanceof Block block) {
+                ASTNode returned = findReturnedValue(block);
+                if (returned != null) {
+                    returnType = toCType(resolveInLambdaScope(lambda, returned), "void");
                 }
+            } else {
+                returnType = toCType(resolveInLambdaScope(lambda, lambda.body), "__auto_type");
             }
 
             sig.append(returnType).append(" ").append(lambdaName).append("(");

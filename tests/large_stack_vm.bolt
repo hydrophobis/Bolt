@@ -1,0 +1,239 @@
+import stdio;
+import stdlib;
+import string;
+
+typedef unsigned int u32;
+
+enum Op {
+    OP_HALT,
+    OP_PUSH,
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DUP,
+    OP_SWAP,
+    OP_JMPZ,
+    OP_PRINT
+};
+
+union Cell {
+    int as_int;
+    char as_bytes[4];
+};
+
+struct Inst {
+    int op;
+    int arg;
+};
+
+struct VM {
+    int stack[64];
+    int sp;
+    int pc;
+    int steps;
+};
+
+void vm_reset(VM* vm) {
+    vm->sp = 0;
+    vm->pc = 0;
+    vm->steps = 0;
+}
+
+void vm_push(VM* vm, int value) {
+    if (vm->sp >= 64) {
+        return;
+    }
+    vm->stack[vm->sp] = value;
+    vm->sp = vm->sp + 1;
+}
+
+int vm_pop(VM* vm) {
+    if (vm->sp <= 0) {
+        return 0;
+    }
+    vm->sp = vm->sp - 1;
+    return vm->stack[vm->sp];
+}
+
+int vm_run(VM* vm, Inst* program, int length) {
+    vm_reset(vm);
+
+    for (;;) {
+        if (vm->pc < 0 || vm->pc >= length) {
+            goto done;
+        }
+        if (vm->steps > 10000) {
+            goto done;
+        }
+
+        Inst inst = program[vm->pc];
+        vm->pc = vm->pc + 1;
+        vm->steps = vm->steps + 1;
+
+        switch (inst.op) {
+            case OP_HALT:
+                goto done;
+            case OP_PUSH:
+                vm_push(vm, inst.arg);
+                break;
+            case OP_ADD: {
+                int b = vm_pop(vm);
+                int a = vm_pop(vm);
+                vm_push(vm, a + b);
+                break;
+            }
+            case OP_SUB: {
+                int b = vm_pop(vm);
+                int a = vm_pop(vm);
+                vm_push(vm, a - b);
+                break;
+            }
+            case OP_MUL: {
+                int b = vm_pop(vm);
+                int a = vm_pop(vm);
+                vm_push(vm, a * b);
+                break;
+            }
+            case OP_DUP: {
+                int a = vm_pop(vm);
+                vm_push(vm, a);
+                vm_push(vm, a);
+                break;
+            }
+            case OP_SWAP: {
+                int b = vm_pop(vm);
+                int a = vm_pop(vm);
+                vm_push(vm, b);
+                vm_push(vm, a);
+                break;
+            }
+            case OP_JMPZ: {
+                int cond = vm_pop(vm);
+                if (cond == 0) {
+                    vm->pc = inst.arg;
+                }
+                break;
+            }
+            case OP_PRINT: {
+                int top = vm_pop(vm);
+                printf("out %d\n", top);
+                vm_push(vm, top);
+                break;
+            }
+            default:
+                goto done;
+        }
+    }
+
+done:
+    return vm->sp > 0 ? vm->stack[vm->sp - 1] : 0;
+}
+
+int apply(int (*op)(int, int), int a, int b) {
+    return op(a, b);
+}
+
+int add_fn(int a, int b) {
+    return a + b;
+}
+
+int mul_fn(int a, int b) {
+    return a * b;
+}
+
+int fib(int n) {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+u32 rotl(u32 value, int by) {
+    return (value << by) | (value >> (32 - by));
+}
+
+u32 hash_string(char* text) {
+    u32 h = 2166136261;
+    int i = 0;
+    while (text[i] != '\0') {
+        h = h ^ text[i];
+        h = h * 16777619;
+        i = i + 1;
+    }
+    return h;
+}
+
+int count_bits(u32 value) {
+    int count = 0;
+    while (value != 0) {
+        count = count + (value & 1);
+        value = value >> 1;
+    }
+    return count;
+}
+
+int grid_trace(int size) {
+    int grid[6][6];
+
+    for (int r = 0; r < size; r++) {
+        for (int c = 0; c < size; c++) {
+            grid[r][c] = r * size + c;
+        }
+    }
+
+    int diagonal = 0;
+    for (int i = 0; i < size; i++) {
+        diagonal = diagonal + grid[i][i];
+    }
+    return diagonal;
+}
+
+char* classify(int n) {
+    if (n < 0) {
+        return "negative";
+    }
+    return n == 0 ? "zero" : (n % 2 == 0 ? "even" : "odd");
+}
+
+int main() {
+    Inst program[12];
+    program[0].op = OP_PUSH;  program[0].arg = 6;
+    program[1].op = OP_PUSH;  program[1].arg = 7;
+    program[2].op = OP_MUL;   program[2].arg = 0;
+    program[3].op = OP_PRINT; program[3].arg = 0;
+    program[4].op = OP_PUSH;  program[4].arg = 2;
+    program[5].op = OP_SUB;   program[5].arg = 0;
+    program[6].op = OP_PRINT; program[6].arg = 0;
+    program[7].op = OP_DUP;   program[7].arg = 0;
+    program[8].op = OP_ADD;   program[8].arg = 0;
+    program[9].op = OP_PRINT; program[9].arg = 0;
+    program[10].op = OP_HALT; program[10].arg = 0;
+    program[11].op = OP_HALT; program[11].arg = 0;
+
+    VM vm;
+    int result = vm_run(&vm, program, 12);
+    printf("result=%d steps=%d\n", result, vm.steps);
+
+    printf("apply(add,3,4)=%d\n", apply(add_fn, 3, 4));
+    printf("apply(mul,3,4)=%d\n", apply(mul_fn, 3, 4));
+
+    printf("fib(15)=%d\n", fib(15));
+
+    Cell cell;
+    cell.as_int = 0;
+    cell.as_bytes[0] = 'A';
+    printf("union byte0=%d\n", cell.as_int & 255);
+
+    u32 h = hash_string("bolt");
+    printf("hash_bits=%d\n", count_bits(h));
+    printf("rotl(1,4)=%u\n", rotl(1, 4));
+
+    printf("trace(6)=%d\n", grid_trace(6));
+
+    printf("classify(-5)=%s\n", classify(-5));
+    printf("classify(0)=%s\n", classify(0));
+    printf("classify(8)=%s\n", classify(8));
+    printf("classify(7)=%s\n", classify(7));
+
+    return 0;
+}

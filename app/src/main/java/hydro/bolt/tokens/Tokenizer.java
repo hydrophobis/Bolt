@@ -309,16 +309,19 @@ public class Tokenizer {
             } else if (nextChar == 'o' || nextChar == 'O') {
                 pos += 2;
                 col += 2;
+                int digitsStart = pos;
                 while (!isAtEnd() && isOctalDigit(peek()))
                     advance();
-                String lexeme = input.substring(start, pos);
+                String lexeme = "0" + input.substring(digitsStart, pos);
                 return new Token(TokenType.INTEGER_LITERAL, lexeme, start, startLine, startCol);
             } else if (nextChar == 'b' || nextChar == 'B') {
                 pos += 2;
                 col += 2;
+                int digitsStart = pos;
                 while (!isAtEnd() && isBinaryDigit(peek()))
                     advance();
-                String lexeme = input.substring(start, pos);
+                String digits = input.substring(digitsStart, pos);
+                String lexeme = digits.isEmpty() ? "0" : Long.toString(Long.parseLong(digits, 2));
                 return new Token(TokenType.INTEGER_LITERAL, lexeme, start, startLine, startCol);
             }
         }

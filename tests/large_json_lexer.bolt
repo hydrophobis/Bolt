@@ -1,0 +1,363 @@
+import stdio;
+import stdlib;
+import string;
+
+enum TokenKind {
+    TK_EOF,
+    TK_LBRACE,
+    TK_RBRACE,
+    TK_LBRACKET,
+    TK_RBRACKET,
+    TK_COLON,
+    TK_COMMA,
+    TK_STRING,
+    TK_NUMBER,
+    TK_TRUE,
+    TK_FALSE,
+    TK_NULL,
+    TK_ERROR
+};
+
+struct Token {
+    int kind;
+    int start;
+    int length;
+};
+
+struct Lexer {
+    char* src;
+    int pos;
+    int len;
+};
+
+int is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+int is_digit_char(char c) {
+    return c >= '0' && c <= '9';
+}
+
+void lexer_init(Lexer* lx, char* src) {
+    lx->src = src;
+    lx->pos = 0;
+    lx->len = strlen(src);
+}
+
+void lexer_skip_space(Lexer* lx) {
+    while (lx->pos < lx->len && is_space(lx->src[lx->pos])) {
+        lx->pos = lx->pos + 1;
+    }
+}
+
+Token lexer_next(Lexer* lx) {
+    lexer_skip_space(lx);
+
+    Token t;
+    t.start = lx->pos;
+    t.length = 1;
+
+    if (lx->pos >= lx->len) {
+        t.kind = TK_EOF;
+        t.length = 0;
+        return t;
+    }
+
+    char c = lx->src[lx->pos];
+
+    switch (c) {
+        case '{':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_LBRACE;
+            return t;
+        case '}':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_RBRACE;
+            return t;
+        case '[':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_LBRACKET;
+            return t;
+        case ']':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_RBRACKET;
+            return t;
+        case ':':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_COLON;
+            return t;
+        case ',':
+            lx->pos = lx->pos + 1;
+            t.kind = TK_COMMA;
+            return t;
+        default:
+            break;
+    }
+
+    if (c == '"') {
+        int begin = lx->pos;
+        lx->pos = lx->pos + 1;
+        while (lx->pos < lx->len && lx->src[lx->pos] != '"') {
+            if (lx->src[lx->pos] == '\\') {
+                lx->pos = lx->pos + 1;
+            }
+            lx->pos = lx->pos + 1;
+        }
+        lx->pos = lx->pos + 1;
+        t.kind = TK_STRING;
+        t.start = begin;
+        t.length = lx->pos - begin;
+        return t;
+    }
+
+    if (is_digit_char(c) || c == '-') {
+        int begin = lx->pos;
+        if (c == '-') {
+            lx->pos = lx->pos + 1;
+        }
+        while (lx->pos < lx->len && is_digit_char(lx->src[lx->pos])) {
+            lx->pos = lx->pos + 1;
+        }
+        if (lx->pos < lx->len && lx->src[lx->pos] == '.') {
+            lx->pos = lx->pos + 1;
+            while (lx->pos < lx->len && is_digit_char(lx->src[lx->pos])) {
+                lx->pos = lx->pos + 1;
+            }
+        }
+        t.kind = TK_NUMBER;
+        t.start = begin;
+        t.length = lx->pos - begin;
+        return t;
+    }
+
+    if (c == 't') {
+        lx->pos = lx->pos + 4;
+        t.kind = TK_TRUE;
+        t.length = 4;
+        return t;
+    }
+    if (c == 'f') {
+        lx->pos = lx->pos + 5;
+        t.kind = TK_FALSE;
+        t.length = 5;
+        return t;
+    }
+    if (c == 'n') {
+        lx->pos = lx->pos + 4;
+        t.kind = TK_NULL;
+        t.length = 4;
+        return t;
+    }
+
+    lx->pos = lx->pos + 1;
+    t.kind = TK_ERROR;
+    return t;
+}
+
+char* kind_name(int kind) {
+    switch (kind) {
+        case TK_EOF: return "eof";
+        case TK_LBRACE: return "{";
+        case TK_RBRACE: return "}";
+        case TK_LBRACKET: return "[";
+        case TK_RBRACKET: return "]";
+        case TK_COLON: return ":";
+        case TK_COMMA: return ",";
+        case TK_STRING: return "string";
+        case TK_NUMBER: return "number";
+        case TK_TRUE: return "true";
+        case TK_FALSE: return "false";
+        case TK_NULL: return "null";
+        default: return "error";
+    }
+}
+
+struct Counts {
+    int objects;
+    int arrays;
+    int strings;
+    int numbers;
+    int literals;
+    int errors;
+};
+
+void counts_reset(Counts* c) {
+    c->objects = 0;
+    c->arrays = 0;
+    c->strings = 0;
+    c->numbers = 0;
+    c->literals = 0;
+    c->errors = 0;
+}
+
+int scan(char* text, Counts* counts) {
+    Lexer lx;
+    lexer_init(&lx, text);
+    counts_reset(counts);
+
+    int depth = 0;
+    int max_depth = 0;
+    int total = 0;
+
+    for (;;) {
+        Token t = lexer_next(&lx);
+        if (t.kind == TK_EOF) {
+            break;
+        }
+
+        total = total + 1;
+
+        switch (t.kind) {
+            case TK_LBRACE:
+                counts->objects = counts->objects + 1;
+                depth = depth + 1;
+                if (depth > max_depth) {
+                    max_depth = depth;
+                }
+                break;
+            case TK_LBRACKET:
+                counts->arrays = counts->arrays + 1;
+                depth = depth + 1;
+                if (depth > max_depth) {
+                    max_depth = depth;
+                }
+                break;
+            case TK_RBRACE:
+            case TK_RBRACKET:
+                depth = depth - 1;
+                break;
+            case TK_STRING:
+                counts->strings = counts->strings + 1;
+                break;
+            case TK_NUMBER:
+                counts->numbers = counts->numbers + 1;
+                break;
+            case TK_TRUE:
+            case TK_FALSE:
+            case TK_NULL:
+                counts->literals = counts->literals + 1;
+                break;
+            case TK_ERROR:
+                counts->errors = counts->errors + 1;
+                break;
+            default:
+                break;
+        }
+
+        if (total > 100000) {
+            break;
+        }
+    }
+
+    return max_depth;
+}
+
+int sum_to(int n) {
+    int total = 0;
+    int i = 0;
+    while (i <= n) {
+        total = total + i;
+        i = i + 1;
+    }
+    return total;
+}
+
+int gcd(int a, int b) {
+    while (b != 0) {
+        int tmp = b;
+        b = a % b;
+        a = tmp;
+    }
+    return a;
+}
+
+void bubble_sort(int* values, int count) {
+    for (int i = 0; i < count; i++) {
+        for (int j = 0; j < count - i - 1; j++) {
+            if (values[j] > values[j + 1]) {
+                int tmp = values[j];
+                values[j] = values[j + 1];
+                values[j + 1] = tmp;
+            }
+        }
+    }
+}
+
+int binary_search(int* values, int count, int needle) {
+    int lo = 0;
+    int hi = count - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (values[mid] == needle) {
+            return mid;
+        }
+        if (values[mid] < needle) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return -1;
+}
+
+int main() {
+    char* doc = "{\"name\":\"bolt\",\"tags\":[1,2,3],\"ok\":true,\"nested\":{\"a\":[{\"b\":null}]}}";
+
+    Counts counts;
+    int depth = scan(doc, &counts);
+
+    printf("objects=%d\n", counts.objects);
+    printf("arrays=%d\n", counts.arrays);
+    printf("strings=%d\n", counts.strings);
+    printf("numbers=%d\n", counts.numbers);
+    printf("literals=%d\n", counts.literals);
+    printf("errors=%d\n", counts.errors);
+    printf("depth=%d\n", depth);
+
+    printf("kind(3)=%s\n", kind_name(3));
+    printf("kind(7)=%s\n", kind_name(7));
+
+    printf("sum_to(10)=%d\n", sum_to(10));
+    printf("gcd(48,18)=%d\n", gcd(48, 18));
+
+    int values[8];
+    values[0] = 42;
+    values[1] = 7;
+    values[2] = 19;
+    values[3] = 3;
+    values[4] = 88;
+    values[5] = 1;
+    values[6] = 56;
+    values[7] = 23;
+
+    bubble_sort(values, 8);
+
+    printf("sorted:");
+    for (int i = 0; i < 8; i++) {
+        printf(" %d", values[i]);
+    }
+    printf("\n");
+
+    printf("find(19)=%d\n", binary_search(values, 8, 19));
+    printf("find(99)=%d\n", binary_search(values, 8, 99));
+
+    int countdown = 3;
+    do {
+        printf("tick %d\n", countdown);
+        countdown = countdown - 1;
+    } while (countdown > 0);
+
+    int skipped = 0;
+    for (int i = 0; i < 10; i++) {
+        if (i % 3 == 0) {
+            continue;
+        }
+        if (i > 7) {
+            break;
+        }
+        skipped = skipped + i;
+    }
+    printf("skipped=%d\n", skipped);
+
+    return 0;
+}

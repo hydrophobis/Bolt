@@ -2,8 +2,8 @@ import std.io
 
 class Player {
     int score;
-    void addScore(int s) { self.score += s; }
-    void printScore() { printf("Score: %d\n", self.score); }
+    public void addScore(int s) { self.score += s; }
+    public void printScore() { printf("Score: %d\n", self.score); }
 }
 
 Player* create_player() {
@@ -29,5 +29,5 @@ int main() {
 }
 
 class Nested {
-    Player* player;
+    public Player* player;
 }

@@ -8,10 +8,17 @@ import hydro.bolt.ast.type.*;
 import hydro.bolt.ast.decl.*;
 import hydro.bolt.ast.expr.*;
 import hydro.bolt.ast.misc.ArrayAccess;
+import hydro.bolt.ast.misc.EnumMember;
+import hydro.bolt.ast.misc.StructMember;
+import hydro.bolt.ast.misc.CharLiteral;
+import hydro.bolt.ast.misc.FloatLiteral;
+import hydro.bolt.ast.misc.IntegerLiteral;
+import hydro.bolt.ast.misc.StringLiteral;
 import hydro.bolt.ast.misc.Block;
 import hydro.bolt.ast.misc.FunctionCall;
 import hydro.bolt.ast.misc.Identifier;
 import hydro.bolt.ast.misc.MemberAccess;
+import hydro.bolt.ast.misc.PointerMemberAccess;
 import hydro.bolt.ast.misc.Parameter;
 import hydro.bolt.ast.statement.*;
 import hydro.bolt.ast.bolt.*;
@@ -174,13 +181,17 @@ public class Parser {
     }
 
     private ASTNode parseTopLevel() {
+        if (match(TokenType.SEMICOLON)) return null;
         if (matchKeyword("operator")) return parseOperatorOverload();
         if (matchKeyword("package")) return parsePackage();
         if (matchKeyword("import")) return parseImport();
-        if (matchKeyword("class")) return parseClass();
-        if (matchKeyword("struct")) return parseClass();
+        if (matchKeyword("class")) return parseClass(Visibility.PRIVATE);
+        if (matchKeyword("struct")) return parseClass(Visibility.PUBLIC);
         if (matchKeyword("interface")) return parseInterface();
         if (matchKeyword("impl")) return parseImpl();
+        if (matchKeyword("enum")) return parseEnum();
+        if (matchKeyword("union")) return parseUnion();
+        if (matchKeyword("typedef")) return parseTypedef();
 
         // Visibility block: public { ... } / private { ... }
         if (checkKeyword("public") || checkKeyword("private")) {
@@ -216,6 +227,7 @@ public class Parser {
     }
 
     private List<ASTNode> pendingNodes = new ArrayList<>();
+    private List<ASTNode> pendingStatements = new ArrayList<>();
 
     /** Apply visibility to a node if it supports it. */
     private void setVisibility(ASTNode node, Visibility vis) {
@@ -277,7 +289,7 @@ public class Parser {
         // if its a decorator, don't let greedy parseStandardC swallow it, loop will handle it
         if (check(TokenType.AT)) return null;
 
-        return parseStandardC();
+        throw error(peek(), "Unexpected token at start of statement");
     }
     
     private boolean checkNext(TokenType type) {
@@ -361,9 +373,7 @@ public class Parser {
         List<Parameter> parameters = new ArrayList<>();
         if (!check(TokenType.RPAREN)) {
             do {
-                ASTNode paramType = parseType();
-                Token paramName = consume(TokenType.IDENTIFIER);
-                parameters.add(new Parameter(paramType, paramName.lexeme));
+                parameters.add(parseParameter());
             } while (match(TokenType.COMMA));
         }
         consume(TokenType.RPAREN);
@@ -380,16 +390,35 @@ public class Parser {
 
         FunctionDeclaration func = new FunctionDeclaration(type, name.lexeme, parameters, body, false);
         func.genericParams = genericParams;
+        func.line = name.line;
+        func.column = name.column;
         return func;
     }
 
 
     private ASTNode parseExpression() {
-        return parseBinary(0, null);
+        return parseTernary(null);
     }
 
     private ASTNode parseExpression(TokenType stopAt) {
-        return parseBinary(0, stopAt);
+        return parseTernary(stopAt);
+    }
+
+    private ASTNode parseTernary(TokenType stopAt) {
+        ASTNode condition = parseBinary(0, stopAt);
+        if (!check(TokenType.QUESTION)) {
+            return condition;
+        }
+
+        Token question = consume(TokenType.QUESTION);
+        ASTNode whenTrue = parseTernary(TokenType.COLON);
+        consume(TokenType.COLON);
+        ASTNode whenFalse = parseTernary(stopAt);
+
+        TernaryExpression ternary = new TernaryExpression(condition, whenTrue, whenFalse);
+        ternary.line = question.line;
+        ternary.column = question.column;
+        return ternary;
     }
 
     private ASTNode parseBinary(int precedence, TokenType stopAt) {
@@ -426,10 +455,14 @@ public class Parser {
     private ASTNode parseUnary() {
         if (check(TokenType.MINUS) || check(TokenType.LOGICAL_NOT) ||
             check(TokenType.BIT_NOT) || check(TokenType.INCREMENT) ||
-            check(TokenType.DECREMENT) || check(TokenType.PLUS)) {
+            check(TokenType.DECREMENT) || check(TokenType.PLUS) ||
+            check(TokenType.STAR) || check(TokenType.BIT_AND)) {
             Token op = consume();
             ASTNode operand = parseUnary();
-            return new UnaryExpression(op.lexeme, operand, true);
+            UnaryExpression ue = new UnaryExpression(op.lexeme, operand, true);
+            ue.line = op.line;
+            ue.column = op.column;
+            return ue;
         }
 
         return parsePostfix();
@@ -444,6 +477,11 @@ public class Parser {
                 MemberAccess ma = new MemberAccess(expr, member.lexeme);
                 ma.line = member.line; ma.column = member.column;
                 expr = ma;
+            } else if (match(TokenType.ARROW)) {
+                Token member = consume(TokenType.IDENTIFIER);
+                PointerMemberAccess pma = new PointerMemberAccess(expr, member.lexeme);
+                pma.line = member.line; pma.column = member.column;
+                expr = pma;
             } else if (match(TokenType.LPAREN)) {
                 Token lp = tokens.get(position - 1);
                 List<ASTNode> args = new ArrayList<>();
@@ -486,6 +524,59 @@ public class Parser {
         return id;
     }
 
+    private static final Set<String> TYPE_SPECIFIERS = Set.of(
+        "unsigned", "signed", "long", "short", "int", "char",
+        "float", "double", "void", "const", "volatile", "register"
+    );
+
+    private static final Set<String> TAGGED_TYPES = Set.of("struct", "union", "enum");
+
+    private String readTypeSpecifiers(Token first) {
+        StringBuilder name = new StringBuilder(first.lexeme);
+
+        if (TAGGED_TYPES.contains(first.lexeme) && check(TokenType.IDENTIFIER)) {
+            name.append(" ").append(consume().lexeme);
+            return name.toString();
+        }
+
+        if (!TYPE_SPECIFIERS.contains(first.lexeme)) {
+            return name.toString();
+        }
+
+        while (check(TokenType.KEYWORD) && TYPE_SPECIFIERS.contains(peek().lexeme)) {
+            name.append(" ").append(consume().lexeme);
+        }
+        return name.toString();
+    }
+
+    private Parameter parseParameter() {
+        ASTNode paramType = parseType();
+
+        if (check(TokenType.LPAREN) && peekNext() != null && peekNext().type == TokenType.STAR) {
+            consume(TokenType.LPAREN);
+            consume(TokenType.STAR);
+            Token fnName = consume(TokenType.IDENTIFIER);
+            consume(TokenType.RPAREN);
+
+            consume(TokenType.LPAREN);
+            List<ASTNode> argTypes = new ArrayList<>();
+            if (!check(TokenType.RPAREN)) {
+                do {
+                    argTypes.add(parseType());
+                    if (check(TokenType.IDENTIFIER)) consume();
+                } while (match(TokenType.COMMA));
+            }
+            consume(TokenType.RPAREN);
+
+            FunctionType fnType = new FunctionType(paramType, argTypes, fnName.line, fnName.column);
+            return new Parameter(fnType, fnName.lexeme, fnName.line, fnName.column);
+        }
+
+        Token paramName = consume(TokenType.IDENTIFIER);
+        paramType = applyArraySuffix(paramType);
+        return new Parameter(paramType, paramName.lexeme, paramName.line, paramName.column);
+    }
+
     private ASTNode parseType() {
         ASTNode type;
         if (match(TokenType.LBRACKET)) {
@@ -496,7 +587,9 @@ public class Parser {
             type = new ArrayType(elementType, size);
         } else {
             Token t = consume();
-            Identifier id = new Identifier(t.lexeme);
+            Identifier id = new Identifier(readTypeSpecifiers(t));
+            id.line = t.line;
+            id.column = t.column;
             if (check(TokenType.LESS) && isTypeStart(peekNext()) && looksLikeGenericArgs()) {
                 consume(TokenType.LESS);
                 do {
@@ -537,6 +630,37 @@ public class Parser {
         return false;
     }
 
+    private boolean looksLikeCast() {
+        if (!isTypeStart(peek())) return false;
+
+        int i = position;
+        if (tokens.get(i).type == TokenType.LBRACKET) return false;
+        i++;
+
+        while (i < tokens.size() && tokens.get(i).type == TokenType.STAR) {
+            i++;
+        }
+        if (i >= tokens.size() || tokens.get(i).type != TokenType.RPAREN) return false;
+
+        if (i == position + 1 && tokens.get(position).type == TokenType.IDENTIFIER) {
+            String name = tokens.get(position).lexeme;
+            if (!symbols.contains(name) && !symbols.contains(resolveName(name))) return false;
+        }
+
+        int after = i + 1;
+        if (after >= tokens.size()) return false;
+        TokenType next = tokens.get(after).type;
+        return next == TokenType.IDENTIFIER || next == TokenType.KEYWORD
+            || next == TokenType.INTEGER_LITERAL || next == TokenType.FLOAT_LITERAL
+            || next == TokenType.CHAR_LITERAL || next == TokenType.STRING_LITERAL
+            || next == TokenType.LPAREN || next == TokenType.STAR
+            || next == TokenType.BIT_AND || next == TokenType.MINUS;
+    }
+
+    private String resolveName(String name) {
+        return currentPackage != null ? currentPackage + "." + name : name;
+    }
+
     private ASTNode parsePrimary() {
         Token t = peek();
 
@@ -568,9 +692,7 @@ public class Parser {
                 }
                 if (t.lexeme.equals("true") || t.lexeme.equals("false")) {
                     consume();
-                    RawCNode boolNode = new RawCNode(t.lexeme);
-                    boolNode.line = t.line; boolNode.column = t.column;
-                    return boolNode;
+                    return new IntegerLiteral(t.lexeme.equals("true") ? "1" : "0", t.line, t.column);
                 }
                 if (t.lexeme.equals("switch")) {
                     return parseSwitchStatement();
@@ -579,27 +701,29 @@ public class Parser {
                     return parseLambda();
                 }
                 consume();
-                return new Identifier(t.lexeme);
+                Identifier keywordId = new Identifier(t.lexeme);
+                keywordId.line = t.line; keywordId.column = t.column;
+                return keywordId;
 
             case INTEGER_LITERAL:
                 consume();
-                RawCNode intNode = new RawCNode(t.lexeme);
-                intNode.line = t.line; intNode.column = t.column;
-                return intNode;
-                
+                return new IntegerLiteral(t.lexeme, t.line, t.column);
+
+            case FLOAT_LITERAL:
+                consume();
+                return new FloatLiteral(t.lexeme, t.line, t.column);
+
             case STRING_LITERAL:
                 consume();
-                RawCNode strNode = new RawCNode(t.lexeme);
-                strNode.line = t.line; strNode.column = t.column;
-                return strNode;
+                return new StringLiteral(t.lexeme, t.line, t.column);
 
             case LPAREN: {
                 consume(TokenType.LPAREN);
                 // Check for C cast: (type)expr
-                if (isTypeStart(peek()) && peekNext() != null && peekNext().type == TokenType.RPAREN) {
+                if (looksLikeCast()) {
                     ASTNode typeNode = parseType();
                     consume(TokenType.RPAREN);
-                    ASTNode target = parseExpression();
+                    ASTNode target = parseUnary();
                     return new UnaryExpression("( " + typeNode.toString() + " )", target, true);
                 }
                 ASTNode expr = parseExpression();
@@ -609,9 +733,7 @@ public class Parser {
 
             case CHAR_LITERAL:
                 consume();
-                RawCNode charNode = new RawCNode(t.lexeme);
-                charNode.line = t.line; charNode.column = t.column;
-                return charNode;
+                return new CharLiteral(t.lexeme, t.line, t.column);
 
             default:
                 throw error(t, "Unexpected token in expression");
@@ -692,8 +814,59 @@ public class Parser {
             return ws;
         }
 
-        if (checkKeyword("for") || checkKeyword("switch")) {
-            return parseComplexStatement();
+        if (checkKeyword("for")) {
+            return parseFor();
+        }
+
+        if (checkKeyword("switch")) {
+            return parseSwitch();
+        }
+
+        if (checkKeyword("do")) {
+            Token t = consume();
+            ASTNode body = parseStatement();
+            if (!matchKeyword("while")) {
+                throw error(peek(), "Expected 'while' after 'do' body");
+            }
+            consume(TokenType.LPAREN);
+            ASTNode condition = parseExpression();
+            consume(TokenType.RPAREN);
+            consume(TokenType.SEMICOLON);
+            DoWhileStatement dw = new DoWhileStatement(body, condition);
+            dw.line = t.line; dw.column = t.column;
+            return dw;
+        }
+
+        if (checkKeyword("break")) {
+            Token t = consume();
+            consume(TokenType.SEMICOLON);
+            return new BreakStatement(t.line, t.column);
+        }
+
+        if (checkKeyword("continue")) {
+            Token t = consume();
+            consume(TokenType.SEMICOLON);
+            return new ContinueStatement(t.line, t.column);
+        }
+
+        if (checkKeyword("goto")) {
+            Token t = consume();
+            Token label = consume(TokenType.IDENTIFIER);
+            consume(TokenType.SEMICOLON);
+            return new GotoStatement(label.lexeme, t.line, t.column);
+        }
+
+        if (check(TokenType.IDENTIFIER) && peekNext() != null
+                && peekNext().type == TokenType.COLON) {
+            Token label = consume(TokenType.IDENTIFIER);
+            consume(TokenType.COLON);
+            ASTNode labelled = check(TokenType.RBRACE) ? null : parseStatement();
+            return new LabeledStatement(label.lexeme, labelled, label.line, label.column);
+        }
+
+        if (check(TokenType.SEMICOLON)) {
+            consume(TokenType.SEMICOLON);
+            return null;
         }
 
         if (check(TokenType.LBRACE)) {
@@ -704,38 +877,47 @@ public class Parser {
         }
 
         // is this a variable decl or expression?
-        if (isTypeStart(peek()) || check(TokenType.LPAREN)) {
+        if (isTypeStart(peek()) || check(TokenType.LPAREN) || startsPrefixExpression()) {
             int saved = position;
             if (peek().type == TokenType.KEYWORD && (peek().lexeme.equals("return") || peek().lexeme.equals("if") ||
                 peek().lexeme.equals("while") || peek().lexeme.equals("new") ||
                 peek().lexeme.equals("delete") || peek().lexeme.equals("package") ||
                 peek().lexeme.equals("import") || peek().lexeme.equals("class") ||
                 peek().lexeme.equals("impl") || peek().lexeme.equals("operator"))) {
-            } else if (!looksLikeArrayElementAccess()) {
+            } else if (!looksLikeArrayElementAccess() && !startsPrefixExpression()) {
                 ASTNode typeNode = parseType();
 
                 if (check(TokenType.IDENTIFIER)) {
                     Token afterName = peekNext();
 
                     if (afterName != null &&
-                        (afterName.type == TokenType.SEMICOLON || afterName.type == TokenType.ASSIGN)) {
-                        Token nameToken = consume(TokenType.IDENTIFIER);
-                        ASTNode initializer = null;
-                        if (match(TokenType.ASSIGN)) {
-                            initializer = parseExpression();
-                        }
+                        (afterName.type == TokenType.SEMICOLON || afterName.type == TokenType.ASSIGN
+                         || afterName.type == TokenType.COMMA || afterName.type == TokenType.LBRACKET)) {
+                        VariableDeclaration first = null;
+                        do {
+                            Token nameToken = consume(TokenType.IDENTIFIER);
+                            ASTNode declType = applyArraySuffix(typeNode);
+                            ASTNode initializer = null;
+                            if (match(TokenType.ASSIGN)) {
+                                initializer = parseExpression();
+                            }
+                            VariableDeclaration vd = new VariableDeclaration(
+                                declType,
+                                nameToken.lexeme,
+                                initializer,
+                                false,
+                                false
+                            );
+                            vd.line = nameToken.line;
+                            vd.column = nameToken.column;
+                            if (first == null) {
+                                first = vd;
+                            } else {
+                                pendingStatements.add(vd);
+                            }
+                        } while (match(TokenType.COMMA) && check(TokenType.IDENTIFIER));
                         consume(TokenType.SEMICOLON);
-
-                        VariableDeclaration vd = new VariableDeclaration(
-                            typeNode,
-                            nameToken.lexeme,
-                            initializer,
-                            false,
-                            false
-                        );
-                        vd.line = nameToken.line;
-                        vd.column = nameToken.column;
-                        return vd;
+                        return first;
                     }
                 }
             }
@@ -759,7 +941,7 @@ public class Parser {
             }
         }
 
-        return parseStandardC();
+        throw error(peek(), "Unexpected token at start of statement");
     }
 
     private List<ASTNode> parseBlockStatements() {
@@ -771,6 +953,9 @@ public class Parser {
             if (stmt != null) {
                 stmt.decorators.addAll(decorators);
                 stmts.add(stmt);
+            }
+            while (!pendingStatements.isEmpty()) {
+                stmts.add(pendingStatements.remove(0));
             }
         }
 
@@ -791,6 +976,13 @@ public class Parser {
             default:
                 return false;
         }
+    }
+
+    private boolean startsPrefixExpression() {
+        return check(TokenType.LOGICAL_NOT) || check(TokenType.BIT_NOT)
+            || check(TokenType.STAR) || check(TokenType.BIT_AND)
+            || check(TokenType.MINUS) || check(TokenType.INCREMENT)
+            || check(TokenType.DECREMENT);
     }
 
     private boolean looksLikeArrayElementAccess() {
@@ -944,6 +1136,10 @@ public class Parser {
     }
 
     private ClassDeclaration parseClass() {
+        return parseClass(Visibility.PRIVATE);
+    }
+
+    private ClassDeclaration parseClass(Visibility defaultVisibility) {
         // keyword already consumed by matchKeyword in parseTopLevel
         Token name = consume(TokenType.IDENTIFIER);
         
@@ -997,14 +1193,15 @@ public class Parser {
             }
             ASTNode node = parseDeclaration();
             if (node != null) {
-                // Default to PRIVATE for class members when no keyword given
-                setVisibility(node, Visibility.PRIVATE);
+                setVisibility(node, defaultVisibility);
                 members.add(node);
             }
         }
         consume(TokenType.RBRACE);
 
         ClassDeclaration classNode = new ClassDeclaration(name.lexeme, members);
+        classNode.line = name.line;
+        classNode.column = name.column;
         classNode.genericParams = genericParams;
         classNode.interfaces = interfaces;
         String fullClassName = (currentPackage != null) ? currentPackage + "." + name.lexeme : name.lexeme;
@@ -1047,6 +1244,8 @@ public class Parser {
         consume(TokenType.RBRACE);
 
         InterfaceDeclaration interfaceNode = new InterfaceDeclaration(name.lexeme, members);
+        interfaceNode.line = name.line;
+        interfaceNode.column = name.column;
         String fullInterfaceName = (currentPackage != null) ? currentPackage + "." + name.lexeme : name.lexeme;
         
         Symbol interfaceSym = new Symbol(name.lexeme, Symbol.Kind.INTERFACE, name.lexeme);
@@ -1089,70 +1288,177 @@ public class Parser {
         return new ImplDeclaration(targetType.lexeme, members);
     }
 
-    private ASTNode parseStandardC() {
-        StringBuilder raw = new StringBuilder();
-        int braceCount = 0;
-
-        // handle for and switch statements specially, they have braced bodies
-        if (checkKeyword("for") || checkKeyword("switch")) {
-            return parseComplexStatement();
-        }
-
-        while (!isAtEnd()) {
-            Token t = peek();
-            if (t == null) break;
-
-            if (t.type == TokenType.LBRACE) braceCount++;
-            if (t.type == TokenType.RBRACE) {
-                if (braceCount == 0) {
-                    // this belongs to the caller
-                    break;
-                }
-                braceCount--;
+    private EnumDeclaration parseEnum() {
+        Token name = consume(TokenType.IDENTIFIER);
+        consume(TokenType.LBRACE);
+        List<EnumMember> members = new ArrayList<>();
+        while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            Token member = consume(TokenType.IDENTIFIER);
+            ASTNode value = null;
+            if (match(TokenType.ASSIGN)) {
+                value = parseExpression();
             }
-
-            if (braceCount == 0 && t.type == TokenType.SEMICOLON) {
-                raw.append(consume().lexeme);
-                break;
-            }
-
-            raw.append(t.lexeme).append(" ");
-            consume();
+            members.add(new EnumMember(member.lexeme, value, member.line, member.column));
+            if (!match(TokenType.COMMA)) break;
         }
-
-        String content = raw.toString().trim();
-        if (content.isEmpty()) return null;
-        return new RawCNode(content);
+        consume(TokenType.RBRACE);
+        match(TokenType.SEMICOLON);
+        return new EnumDeclaration(name.lexeme, members, name.line, name.column);
     }
 
-    private ASTNode parseComplexStatement() {
-        StringBuilder raw = new StringBuilder();
-        int braceDepth = 0;
+    private UnionDeclaration parseUnion() {
+        Token name = consume(TokenType.IDENTIFIER);
+        consume(TokenType.LBRACE);
+        List<StructMember> members = new ArrayList<>();
+        while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            ASTNode memberType = parseType();
+            Token memberName = consume(TokenType.IDENTIFIER);
+            memberType = applyArraySuffix(memberType);
+            consume(TokenType.SEMICOLON);
+            members.add(new StructMember(memberType, memberName.lexeme, memberName.line, memberName.column));
+        }
+        consume(TokenType.RBRACE);
+        match(TokenType.SEMICOLON);
+        return new UnionDeclaration(name.lexeme, members, name.line, name.column);
+    }
 
-        while (!isAtEnd()) {
-            Token t = peek();
-            if (t == null) break;
+    private TypedefDeclaration parseTypedef() {
+        ASTNode aliased = parseType();
+        Token name = consume(TokenType.IDENTIFIER);
+        aliased = applyArraySuffix(aliased);
+        consume(TokenType.SEMICOLON);
+        return new TypedefDeclaration(aliased, name.lexeme, name.line, name.column);
+    }
 
-            // append token to raw output
-            raw.append(t.lexeme).append(" ");
+    private ASTNode applyArraySuffix(ASTNode type) {
+        while (check(TokenType.LBRACKET)) {
+            consume(TokenType.LBRACKET);
+            ASTNode size = check(TokenType.RBRACKET) ? null : parseExpression(TokenType.RBRACKET);
+            consume(TokenType.RBRACKET);
+            type = new ArrayType(type, size);
+        }
+        return type;
+    }
 
-            if (t.type == TokenType.LBRACE) {
-                braceDepth++;
-            } else if (t.type == TokenType.RBRACE) {
-                braceDepth--;
-                // after closing brace of the body, we're done
-                if (braceDepth == 0) {
-                    consume();
-                    break;
-                }
-            }
+    private ASTNode parseFor() {
+        Token t = consume();
+        consume(TokenType.LPAREN);
 
-            consume();
+        ASTNode initializer = null;
+        if (!check(TokenType.SEMICOLON)) {
+            initializer = parseForInitializer();
+        } else {
+            consume(TokenType.SEMICOLON);
         }
 
-        String content = raw.toString().trim();
-        if (content.isEmpty()) return null;
-        return new RawCNode(content);
+        ASTNode condition = null;
+        if (!check(TokenType.SEMICOLON)) {
+            condition = parseExpression();
+        }
+        consume(TokenType.SEMICOLON);
+
+        ASTNode update = null;
+        if (!check(TokenType.RPAREN)) {
+            List<ASTNode> updates = new ArrayList<>();
+            do {
+                updates.add(parseExpression());
+            } while (match(TokenType.COMMA));
+            update = updates.size() == 1 ? updates.get(0) : new Block(updates);
+        }
+        consume(TokenType.RPAREN);
+
+        ASTNode body = parseStatement();
+        ForStatement fs = new ForStatement(initializer, condition, update, body);
+        fs.line = t.line; fs.column = t.column;
+        return fs;
+    }
+
+    private ASTNode parseForInitializer() {
+        int saved = position;
+        if (isTypeStart(peek()) && !looksLikeArrayElementAccess()) {
+            try {
+                ASTNode typeNode = parseType();
+                if (check(TokenType.IDENTIFIER)) {
+                    List<ASTNode> declarators = new ArrayList<>();
+                    do {
+                        Token name = consume(TokenType.IDENTIFIER);
+                        ASTNode declType = applyArraySuffix(typeNode);
+                        ASTNode init = null;
+                        if (match(TokenType.ASSIGN)) {
+                            init = parseExpression();
+                        }
+                        VariableDeclaration vd =
+                            new VariableDeclaration(declType, name.lexeme, init, false, false);
+                        vd.line = name.line; vd.column = name.column;
+                        declarators.add(vd);
+                    } while (match(TokenType.COMMA) && check(TokenType.IDENTIFIER));
+
+                    if (check(TokenType.SEMICOLON)) {
+                        consume(TokenType.SEMICOLON);
+                        return declarators.size() == 1
+                            ? declarators.get(0)
+                            : new Block(declarators);
+                    }
+                }
+            } catch (ParseError e) {
+            }
+            position = saved;
+        }
+
+        ASTNode expr = parseExpression();
+        consume(TokenType.SEMICOLON);
+        ExpressionStatement es = new ExpressionStatement(expr);
+        es.line = expr.line; es.column = expr.column;
+        return es;
+    }
+
+    private ASTNode parseSwitch() {
+        Token t = consume();
+        consume(TokenType.LPAREN);
+        ASTNode subject = parseExpression();
+        consume(TokenType.RPAREN);
+        consume(TokenType.LBRACE);
+
+        List<ASTNode> sections = new ArrayList<>();
+        while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            if (matchKeyword("case")) {
+                Token caseToken = tokens.get(position - 1);
+                ASTNode value = parseExpression();
+                consume(TokenType.COLON);
+                CaseStatement cs = new CaseStatement(value, parseSwitchSection());
+                cs.line = caseToken.line; cs.column = caseToken.column;
+                sections.add(cs);
+            } else if (matchKeyword("default")) {
+                Token defaultToken = tokens.get(position - 1);
+                consume(TokenType.COLON);
+                DefaultStatement ds = new DefaultStatement(parseSwitchSection());
+                ds.line = defaultToken.line; ds.column = defaultToken.column;
+                sections.add(ds);
+            } else {
+                ASTNode stray = parseStatement();
+                if (stray != null) sections.add(stray);
+            }
+        }
+        consume(TokenType.RBRACE);
+
+        Block body = new Block(sections);
+        body.line = t.line; body.column = t.column;
+        SwitchStatement ss = new SwitchStatement(subject, body);
+        ss.line = t.line; ss.column = t.column;
+        return ss;
+    }
+
+    private List<ASTNode> parseSwitchSection() {
+        List<ASTNode> statements = new ArrayList<>();
+        while (!check(TokenType.RBRACE) && !isAtEnd()
+                && !checkKeyword("case") && !checkKeyword("default")) {
+            ASTNode stmt = parseStatement();
+            if (stmt != null) statements.add(stmt);
+            while (!pendingStatements.isEmpty()) {
+                statements.add(pendingStatements.remove(0));
+            }
+        }
+        return statements;
     }
 
     private boolean check(TokenType type) {

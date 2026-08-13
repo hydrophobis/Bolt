@@ -27,5 +27,5 @@ int main() {
 }
 
 class Matrix {
-    [int; 10] data;
+    public [int; 10] data;
 }

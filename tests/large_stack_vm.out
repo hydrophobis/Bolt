@@ -1,0 +1,15 @@
+out 42
+out 40
+out 80
+result=80 steps=11
+apply(add,3,4)=7
+apply(mul,3,4)=12
+fib(15)=610
+union byte0=65
+hash_bits=18
+rotl(1,4)=16
+trace(6)=105
+classify(-5)=negative
+classify(0)=zero
+classify(8)=even
+classify(7)=odd

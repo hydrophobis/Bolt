@@ -8,19 +8,30 @@ Only tested on Windows, i see no reason it wouldnt work on Linux/MacOS
 
 I use MS Java 21.0.9 for building and running
 
+```sh
+./gradlew build          # compile and run the unit tests
+./run_tests.sh           # transpile, compile, and run the .bolt test programs
+```
+
+The end-to-end suite needs `clang` on PATH. CI runs both on every push.
+
 ---
 ### <span style="color:#913311;">Planned features
-- a better bolt std library
+- a bolt std library wrapping the C standard library
 
 ### <span style="color:#913311;">Features
 
 #### <span style="color:#913311;">Classes
 
-Classes group fields and methods together. Methods receive an implicit `self` pointer. Use `new` to heap-allocate and `delete` to free. Class methods are private by default, and fields are private by default.
+Classes group fields and methods together. Methods receive an implicit `self` pointer. Use `new` to construct and `delete` to destroy; whether that involves the heap depends on whether you declare the variable as a value or a pointer (see below).
 
 Access modifiers:
 - `public` - accessible from anywhere
 - `private` - accessible only within the class
+
+Members with no modifier default to `private` in a `class` and `public` in a
+`struct`, matching C++. Access is enforced by the compiler, so reaching for a
+private field from outside its class is an error (`E2007`).
 
 ```cpp
 import stdio;
@@ -51,11 +62,31 @@ void __boltN4Vec25printEv(Vec2* self) {
     printf("(%d, %d)\n", self->x, self->y);
 }
 int main() {
-    Vec2 v = (*(Vec2*)malloc(sizeof(Vec2)));
-    v.x = 3; v.y = 4;
+    Vec2 v = (Vec2){0};
+    v.x = 3;
+    v.y = 4;
     __boltN4Vec25printEv(&v);
-    free(v);
+    (void)0;
 }
+```
+
+Declaring the variable as a value gives you an object, constructed in place -
+nothing is allocated, so nothing can leak, and `delete` on it just runs `dinit`
+if the class has one. Declare it as a pointer to get a real heap allocation that
+`delete` frees:
+
+```cpp
+Vec2* v = new Vec2();
+v.x = 3;
+v.print();
+delete v;          // calls dinit if present, then free()
+```
+
+```c
+Vec2* v = ((Vec2*)calloc(1, sizeof(Vec2)));
+v->x = 3;
+__boltN4Vec25printEv(v);
+free(v);
 ```
 
 ---
@@ -201,6 +232,9 @@ int main() {
 
 Define custom behavior for operators on your types. Unary form: `operator ReturnType Op Arg`. Binary form: `operator ReturnType Left Op Right`.
 
+**Operator overloading is off by default.** Set `operator-overloading=true` in
+`bolt.cfg` to enable it.
+
 ```cpp
 import stdio;
 
@@ -242,14 +276,22 @@ void __bolt_operator_lnot_Vec2(Vec2 a) { ... }
 
 Anonymous functions that can capture variables from their enclosing scope.
 
+**Lambdas are off by default.** Set `lambdas=true` in `bolt.cfg` (or pass
+`--lambdas`) to enable them, otherwise using one is a compile error:
+
+```ini
+lambdas=true
+```
+
+The return type is inferred from the body.
+
 ```cpp
 import stdio;
 
 int main() {
-    int x = 10;
+    printf("5 + 3 = %d\n", fn(int a, int b) { return a + b; }(5, 3));
 
-    // Simple lambda
-    printf("5 + 3 = %d\n", fn(int a, int b) { printf("Add lambda: %d\n", a + b); }(5, 3));
+    fn(int v) { printf("value: %d\n", v); }(42);
 }
 ```
 
@@ -363,48 +405,101 @@ void log(string msg);   // log(msg) -> puts(msg)
 #### <span style="color:#913311;">bolt.cfg
 
 Project-level configuration file. Place `bolt.cfg` in your working directory.
+Any setting can also be overridden per-invocation: `--key=value`, or `--key` on
+its own to set a boolean to true.
 
-```ini
-# Name mangling (default: true)
-mangle=true
+Unknown keys and out-of-range values are reported with a
+suggestion when a key looks like a typo:
 
-# Disallow heap allocation - new/delete/string become errors (default: false)
-no-heap=false
-
-# Emit source traceability comments in generated C (default: false)
-traceability=true
-
-# Enable operator overloading (default: false)
-operator-overloading=false
-
-# Target C standard (default: c99)
-c-standard=c99
-
-# Allow recursive functions (default: true)
-allow-recursion=true
-
-# Comma-separated list of forbidden import paths
-forbidden-headers=
-
-# Enforce strict type checking (default: false)
-strict-typing=false
-
-# Prefix used for mangled names (default: __bolt)
-mangle-prefix=__bolt
-
-# Code style & formatting
-indent-size=4
-indent-style=space
-brace-style=k&r
-line-width=80
-
-# Memory & resource management
-string-buffer-size=256
-static-string-pool=false
-
-# Transpiler behavior & dx
-max-errors=10
-no-std-includes=false
-no-string-helpers=false
-verbose=false
 ```
+bolt.cfg:2:1: warning[W3001]: unknown setting 'strict_typing'; did you mean 'strict-typing'?
+  |
+2 | strict_typing=true
+  | ^^^^^^^^^^^^^
+```
+
+##### Language features
+
+| Setting | Default | Effect |
+|---|---|---|
+| `strict-typing` | `true` | Type-rule violations are errors. Set `false` to demote them to warnings while migrating existing code. |
+| `lambdas` | `false` | Allow lambda expressions. |
+| `operator-overloading` | `false` | Allow `operator` declarations. |
+| `allow-recursion` | `true` | Allow a function to call itself. |
+| `no-heap` | `false` | Forbid `new`, `delete`, and managed `string`. |
+| `forbidden-headers` | *(empty)* | Comma-separated import paths to reject. |
+
+##### Output
+
+| Setting | Default | Effect |
+|---|---|---|
+| `c-standard` | `c99` | Target C standard: `c89`, `c90`, `c99`, `c11`, `c17`, `c23`. Targeting C89 disables `@inline`, since `inline` is a C99 addition. |
+| `mangle` | `true` | Mangle generated names. |
+| `mangle-prefix` | `__bolt` | Prefix for mangled names. |
+| `traceability` | `false` | Emit `/* line N */` comments mapping generated C back to Bolt source. |
+| `no-std-includes` | `false` | Skip the automatic `<stdio.h>`/`<stdlib.h>`/`<string.h>`/`<stdarg.h>` includes. |
+| `no-string-helpers` | `false` | Skip the generated `string` runtime helpers. |
+
+##### Formatting
+
+| Setting | Default | Effect |
+|---|---|---|
+| `indent-size` | `4` | Columns per indent level. |
+| `indent-style` | `space` | `space` or `tab`. |
+| `brace-style` | `k&r` | `k&r` or `allman`. |
+| `line-width` | `80` | Wrap generated lines longer than this at argument commas. `0` disables wrapping. |
+
+##### Memory
+
+| Setting | Default | Effect |
+|---|---|---|
+| `string-buffer-size` | `256` | Stack buffer size used when formatting numbers into strings. |
+| `static-string-pool` | `false` | Deduplicate identical string literals into shared `static const` storage. Copy-on-assign semantics are unchanged. |
+
+##### Diagnostics
+
+| Setting | Default | Effect |
+|---|---|---|
+| `max-errors` | `10` | Stop after this many errors. `0` means unlimited. Warnings are never capped. |
+| `verbose` | `false` | Print the resolved configuration, and stack traces for internal compiler errors. |
+
+---
+
+#### <span style="color:#913311;">Diagnostics
+
+Bolt checks your program before generating C, so mistakes are reported against
+your source rather than surfacing later as errors in generated C.
+
+```
+tests/shapes.bolt:14:7: error[E2007]: 'radius' is private to 'Circle'
+   |
+14 |     c.radius = 5;
+   |       ^^^^^^
+1 error generated.
+```
+
+Every diagnostic carries a stable code you can search for. The number tells you
+which phase produced it:
+
+| Range | Phase |
+|---|---|
+| `E0xxx` | Tokenizer |
+| `E1xxx` | Parser |
+| `E2xxx` / `W2xxx` | Semantic analysis |
+| `E3xxx` / `W3xxx` | Configuration |
+| `E9xxx` | Internal compiler error, please report these |
+
+Some of what the analyzer catches:
+
+- unknown types, undefined names, and unknown or private class members
+- wrong argument counts, and argument, assignment, and return type mismatches
+- classes that do not implement an interface they declare
+- wrong number of generic type arguments
+- value-returning functions that never return a value
+- duplicate declarations, unreachable code, shadowed and unused variables
+- `new`, `delete`, or `string` used under `no-heap`; recursion under
+  `allow-recursion=false`; lambdas or operator overloads while disabled
+
+The analyzer is deliberately conservative. Bolt compiles one file at a time on
+top of C, so when it cannot see enough it stays quiet.
+A checker you have to argue with is a checker you turn off. (As they say)

@@ -7,6 +7,7 @@ import java.util.List;
 
 import hydro.bolt.ast.*;
 import hydro.bolt.ast.bolt.PackageDeclaration;
+import hydro.bolt.sema.SemanticAnalyzer;
 import hydro.bolt.tokens.*;
 
 import java.io.FileWriter;
@@ -17,12 +18,7 @@ public class Bolt {
 
     public static void main(String[] args) throws IOException {
         if (args.length == 0 || args[0].equals("-h") || args[0].equals("--help")) {
-            System.out.println("Bolt Compiler");
-            System.out.println("Usage: bolt <input.bolt> [output.c] [options]");
-            System.out.println("\nOptions:");
-            System.out.println("  -h, --help            Show this help message");
-            System.out.println("  --<key>=<value>      Override configuration setting");
-            System.out.println("  --<flag>             Set boolean configuration setting to true");
+            printUsage();
             return;
         }
 
@@ -49,29 +45,38 @@ public class Bolt {
             }
         }
 
+        ErrorReporter configDiagnostics = config.diagnostics();
+        configDiagnostics.printErrors();
+        if (configDiagnostics.hasErrors()) {
+            System.exit(1);
+        }
+
         if (inputFile == null) {
-            System.err.println("Error: No input file specified");
+            System.err.println("error: no input file specified");
+            printUsage();
             System.exit(1);
         }
 
         if (!Files.exists(Paths.get(inputFile))) {
-            System.err.println("Error: Input file not found: " + inputFile);
+            System.err.println("error: input file not found: " + inputFile);
             System.exit(1);
         }
 
         if (config.getBoolean("verbose")) {
             System.out.println("Bolt Compiler - Configuration:");
-            String[] verboseKeys = {"mangle", "mangle-prefix", "indent-size", "brace-style", "allow-recursion"};
-            for (String key : verboseKeys) {
+            for (String key : Config.knownKeys().stream().sorted().toList()) {
                 System.out.println("  " + key + ": " + config.get(key));
             }
         }
 
         String code = Files.readString(Paths.get(inputFile));
-        ErrorReporter reporter = new ErrorReporter();
+
+        ErrorReporter reporter = new ErrorReporter(inputFile, code);
+        reporter.setMaxErrors(config.getInt("max-errors"));
+
         Tokenizer tokenizer = new Tokenizer(code, reporter);
         List<Token> tokens = tokenizer.tokenize();
-        
+
         Parser parser = new Parser(tokens, config);
         parser.reporter = reporter;
         ASTTree ast = parser.parse();
@@ -81,7 +86,13 @@ public class Bolt {
             System.exit(1);
         }
 
-        // package path for output placement
+        new SemanticAnalyzer(ast, config, reporter, parser.imports).analyze();
+
+        if (reporter.hasErrors()) {
+            reporter.printErrors();
+            System.exit(1);
+        }
+
         String packageName = null;
         for (ASTNode node : ast) {
             if (node instanceof PackageDeclaration pkg) {
@@ -107,7 +118,6 @@ public class Bolt {
             }
         }
 
-        // Ensure output directory exists
         java.nio.file.Path outputPath = Paths.get(outputFile);
         if (outputPath.getParent() != null) {
             Files.createDirectories(outputPath.getParent());
@@ -117,13 +127,14 @@ public class Bolt {
         generator.symbols = parser.symbols;
         generator.imports = parser.imports;
         generator.reporter = reporter;
+
         String generatedCode;
         try {
             generatedCode = generator.generate();
         } catch (Exception e) {
-            e.printStackTrace();
+            reportInternalError(reporter, config, "code generation", e);
             System.exit(1);
-            throw new RuntimeException("Unreachable"); // satisfies compiler
+            return;
         }
 
         if (reporter.hasErrors()) {
@@ -131,34 +142,68 @@ public class Bolt {
             System.exit(1);
         }
 
-        if (outputFile != null) {
-            try (FileWriter writer = new FileWriter(outputFile)) {
-                writer.write(generatedCode);
-            }
-            System.out.println("Transpilation successful. Output written to " + outputFile);
+        String headerCode;
+        try {
+            headerCode = generator.generateHeader();
+        } catch (Exception e) {
+            reportInternalError(reporter, config, "header generation", e);
+            System.exit(1);
+            return;
+        }
 
-            String headerFile = outputFile.endsWith(".c")
-                ? outputFile.substring(0, outputFile.length() - 2) + ".h"
-                : outputFile + ".h";
+        if (reporter.hasErrors()) {
+            reporter.printErrors();
+            System.exit(1);
+        }
 
-            java.nio.file.Path headerPath = Paths.get(headerFile);
-            if (headerPath.getParent() != null) {
-                Files.createDirectories(headerPath.getParent());
-            }
+        reporter.printErrors();
 
-            try {
-                String headerCode = generator.generateHeader();
-                try (FileWriter headerWriter = new FileWriter(headerFile)) {
-                    headerWriter.write(headerCode);
-                }
-                System.out.println("Header generation successful. Output written to " + headerFile);
-            } catch (Exception e) {
-                System.err.println("Warning: failed to generate header: " + e.getMessage());
-                e.printStackTrace();
-                System.exit(1);
-            }
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            writer.write(generatedCode);
+        }
+        System.out.println("Transpilation successful. Output written to " + outputFile);
+
+        String headerFile = outputFile.endsWith(".c")
+            ? outputFile.substring(0, outputFile.length() - 2) + ".h"
+            : outputFile + ".h";
+
+        java.nio.file.Path headerPath = Paths.get(headerFile);
+        if (headerPath.getParent() != null) {
+            Files.createDirectories(headerPath.getParent());
+        }
+
+        try (FileWriter headerWriter = new FileWriter(headerFile)) {
+            headerWriter.write(headerCode);
+        }
+        System.out.println("Header generation successful. Output written to " + headerFile);
+    }
+
+    private static void reportInternalError(ErrorReporter reporter, Config config,
+                                            String phase, Exception e) {
+        reporter.printErrors();
+        System.err.println("error[" + ErrorCode.INTERNAL_ERROR.id() + "]: internal compiler error during "
+            + phase + ": " + e);
+        System.err.println("note: this is a bug in Bolt. Please report it with the source that triggered it.");
+        if (config.getBoolean("verbose")) {
+            e.printStackTrace();
         } else {
-            System.out.println(generatedCode);
+            System.err.println("note: re-run with --verbose for a stack trace.");
+        }
+    }
+
+    private static void printUsage() {
+        System.out.println("Bolt Compiler");
+        System.out.println("Usage: bolt <input.bolt> [output.c] [options]");
+        System.out.println();
+        System.out.println("Options:");
+        System.out.println("  -h, --help           Show this help message");
+        System.out.println("  -o <file>            Write generated C to <file>");
+        System.out.println("  --<key>=<value>      Override a bolt.cfg setting");
+        System.out.println("  --<flag>             Set a boolean bolt.cfg setting to true");
+        System.out.println();
+        System.out.println("Settings:");
+        for (String key : Config.knownKeys().stream().sorted().toList()) {
+            System.out.println("  " + key);
         }
     }
 }

@@ -79,10 +79,10 @@ for bolt_file in tests/*.bolt; do
 
     # 1. Transpile using Gradle (specifying :app:run to execute from root)
     # Output logs to build dir to keep output clean
-    ./gradlew :app:run --quiet --args="../$bolt_file ../$output_c" > "tests/build/${base}/${base}_transpile.log" 2>&1
+    ./gradlew :app:run --quiet --args="../$bolt_file ../$output_c" > "$output_dir/${base}_transpile.log" 2>&1
     if [ $? -ne 0 ]; then
         echo -e "${RED}FAILED (Transpilation)${NC}"
-        echo "  See tests/build/${base}/${base}_transpile.log for details"
+        echo "  See $output_dir/${base}_transpile.log for details"
         continue
     fi
 
@@ -90,7 +90,7 @@ for bolt_file in tests/*.bolt; do
     clang -I tests/build "$output_c" $dependency_objects -o "$output_bin" > "$output_dir/${base}_compile.log" 2>&1
     if [ $? -ne 0 ]; then
         echo -e "${RED}FAILED (C Compilation)${NC}"
-        echo "  See tests/build/${base}/${base}_compile.log for details"
+        echo "  See $output_dir/${base}_compile.log for details"
         continue
     fi
 
