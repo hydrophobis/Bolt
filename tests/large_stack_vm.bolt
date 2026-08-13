@@ -188,6 +188,16 @@ int grid_trace(int size) {
     return diagonal;
 }
 
+class Plain {
+    public int x;
+    public void print() { printf("plain %d\n", self.x); }
+}
+
+class Owned {
+    public int v;
+    public void dinit() { printf("dinit %d\n", self.v); }
+}
+
 char* classify(int n) {
     if (n < 0) {
         return "negative";
@@ -234,6 +244,40 @@ int main() {
     printf("classify(0)=%s\n", classify(0));
     printf("classify(8)=%s\n", classify(8));
     printf("classify(7)=%s\n", classify(7));
+
+    for (int i = 0, j = 10; i < 3; i++) {
+        printf("decl %d%d\n", i, j);
+    }
+
+    int k = 9;
+    for (int i = 0; i < 3; i++, k--) {
+        printf("comma %d%d\n", i, k);
+    }
+
+    for (int i = 0, j = 5; i < j; i++, j--) {
+        printf("both %d%d\n", i, j);
+    }
+
+    Plain a = new Plain();
+    a.x = 3;
+    a.print();
+    delete a;
+
+    Plain* b = new Plain();
+    b.x = 4;
+    b.print();
+    delete b;
+
+    Owned c = new Owned();
+    c.v = 5;
+    delete c;
+
+    Owned* d = new Owned();
+    d.v = 6;
+    delete d;
+
+    Owned e;
+    e.v = 7;
 
     return 0;
 }

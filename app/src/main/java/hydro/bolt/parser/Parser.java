@@ -239,6 +239,15 @@ public class Parser {
     }
 
     private ASTNode parseTopLevelWithoutVisibility() {
+        if (matchKeyword("operator")) return parseOperatorOverload();
+        if (matchKeyword("class")) return parseClass(Visibility.PRIVATE);
+        if (matchKeyword("struct")) return parseClass(Visibility.PUBLIC);
+        if (matchKeyword("interface")) return parseInterface();
+        if (matchKeyword("impl")) return parseImpl();
+        if (matchKeyword("enum")) return parseEnum();
+        if (matchKeyword("union")) return parseUnion();
+        if (matchKeyword("typedef")) return parseTypedef();
+
         if (isTypeStart(peek()) || check(TokenType.LPAREN)) {
             int saved = position;
             
@@ -421,6 +430,18 @@ public class Parser {
         return ternary;
     }
 
+    private static final Set<TokenType> RIGHT_ASSOCIATIVE = Set.of(
+        TokenType.ASSIGN,
+        TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN,
+        TokenType.STAR_ASSIGN, TokenType.SLASH_ASSIGN, TokenType.PERCENT_ASSIGN,
+        TokenType.BIT_AND_ASSIGN, TokenType.BIT_OR_ASSIGN, TokenType.BIT_XOR_ASSIGN,
+        TokenType.SHIFT_LEFT_ASSIGN, TokenType.SHIFT_RIGHT_ASSIGN
+    );
+
+    private boolean isRightAssociative(TokenType type) {
+        return RIGHT_ASSOCIATIVE.contains(type);
+    }
+
     private ASTNode parseBinary(int precedence, TokenType stopAt) {
         ASTNode left = parseUnary();
 
@@ -433,7 +454,8 @@ public class Parser {
             if (opPrecedence < precedence) break;
 
             consume();
-            ASTNode right = parseBinary(opPrecedence + 1, stopAt);
+            ASTNode right = parseBinary(
+                isRightAssociative(op.type) ? opPrecedence : opPrecedence + 1, stopAt);
             BinaryExpression bin = new BinaryExpression(left, op.lexeme, right);
             bin.line = op.line;
             bin.column = op.column;

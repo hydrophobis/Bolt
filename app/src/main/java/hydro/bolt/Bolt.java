@@ -4,9 +4,11 @@ import hydro.bolt.parser.*;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 import hydro.bolt.ast.*;
 import hydro.bolt.ast.bolt.PackageDeclaration;
+import hydro.bolt.sema.ModuleResolver;
 import hydro.bolt.sema.SemanticAnalyzer;
 import hydro.bolt.tokens.*;
 
@@ -86,7 +88,14 @@ public class Bolt {
             System.exit(1);
         }
 
-        new SemanticAnalyzer(ast, config, reporter, parser.imports).analyze();
+        ModuleResolver resolver = new ModuleResolver(Paths.get(inputFile), config);
+        SemanticAnalyzer analyzer = new SemanticAnalyzer(ast, config, reporter, parser.imports);
+        analyzer.setModules(resolver.resolveAll(parser.imports));
+        for (Map.Entry<String, String> failure : resolver.failures().entrySet()) {
+            reporter.warn(ErrorCode.MODULE_NOT_ANALYZED,
+                "import '" + failure.getKey() + "' could not be analyzed: " + failure.getValue());
+        }
+        analyzer.analyze();
 
         if (reporter.hasErrors()) {
             reporter.printErrors();

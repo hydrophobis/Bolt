@@ -40,6 +40,12 @@ public class SemanticAnalyzer {
     private int loopDepth;
     private int switchDepth;
     private final Deque<List<String>> genericParamStack = new ArrayDeque<>();
+    private Map<String, ASTTree> modules = Map.of();
+
+    public void setModules(Map<String, ASTTree> modules) {
+        this.modules = modules != null ? modules : Map.of();
+    }
+
     public SemanticAnalyzer(ASTTree tree, Config config, ErrorReporter reporter, List<String> imports) {
         this.tree = tree;
         this.config = config;
@@ -54,6 +60,7 @@ public class SemanticAnalyzer {
 
     public void analyze() {
         collectImports();
+        registerModules();
         collect();
         for (ASTNode node : tree) {
             checkDeclaration(node);
@@ -64,7 +71,7 @@ public class SemanticAnalyzer {
         for (String path : imports) {
             if (CStdlib.isKnownHeader(path)) {
                 externalSymbols.addAll(CStdlib.symbolsFor(path));
-            } else {
+            } else if (!modules.containsKey(path)) {
                 openWorld = true;
             }
         }
@@ -126,15 +133,65 @@ public class SemanticAnalyzer {
                 }
             }
         }
+        Map<String, List<FunctionDeclaration>> localFunctions = new HashMap<>();
         for (ASTNode node : tree) {
             if (node instanceof FunctionDeclaration func) {
                 functions.computeIfAbsent(func.name, k -> new ArrayList<>()).add(func);
+                localFunctions.computeIfAbsent(func.name, k -> new ArrayList<>()).add(func);
             } else if (node instanceof VariableDeclaration var) {
                 globals.put(var.name, typeToString(var.type));
             }
         }
-        for (Map.Entry<String, List<FunctionDeclaration>> e : functions.entrySet()) {
+        for (Map.Entry<String, List<FunctionDeclaration>> e : localFunctions.entrySet()) {
             reportDuplicateOverloads(e.getKey(), e.getValue());
+        }
+    }
+
+    private void registerModules() {
+        for (ASTTree moduleTree : modules.values()) {
+            for (ASTNode node : moduleTree) {
+                registerExported(node);
+            }
+        }
+        for (ASTTree moduleTree : modules.values()) {
+            for (ASTNode node : moduleTree) {
+                if (node instanceof ImplDeclaration impl) {
+                    ClassInfo info = classes.get(impl.targetType);
+                    if (info == null) continue;
+                    for (ASTNode member : impl.members) {
+                        addMember(info, member);
+                    }
+                }
+            }
+        }
+    }
+
+    private void registerExported(ASTNode node) {
+        if (node instanceof ClassDeclaration cls) {
+            classes.putIfAbsent(cls.name, buildClassInfo(cls));
+            knownTypes.add(cls.name);
+        } else if (node instanceof InterfaceDeclaration iface) {
+            interfaces.putIfAbsent(iface.name, iface);
+            knownTypes.add(iface.name);
+        } else if (node instanceof StructDeclaration s) {
+            knownTypes.add(s.name);
+        } else if (node instanceof UnionDeclaration u) {
+            knownTypes.add(u.name);
+        } else if (node instanceof EnumDeclaration e) {
+            knownTypes.add(e.name);
+            if (e.members != null) {
+                for (EnumMember m : e.members) enumConstants.add(m.name);
+            }
+        } else if (node instanceof TypedefDeclaration t) {
+            knownTypes.add(t.name);
+            String aliased = typeToString(t.type);
+            if (aliased != null) typedefs.putIfAbsent(t.name, aliased);
+        } else if (node instanceof FunctionDeclaration func) {
+            if (func.visibility == Visibility.PRIVATE) return;
+            functions.computeIfAbsent(func.name, k -> new ArrayList<>()).add(func);
+        } else if (node instanceof VariableDeclaration var) {
+            if (var.visibility == Visibility.PRIVATE) return;
+            globals.putIfAbsent(var.name, typeToString(var.type));
         }
     }
 

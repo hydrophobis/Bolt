@@ -1781,6 +1781,15 @@ public String visitExpressionStatement(ExpressionStatement node) {
         return null;
     }
 
+    private String captureExpression(ASTNode node) {
+        StringBuilder buf = new StringBuilder();
+        StringBuilder old = builder;
+        builder = buf;
+        node.accept(this);
+        builder = old;
+        return buf.toString();
+    }
+
     private void collectStringAddends(ASTNode node, List<ASTNode> addends) {
         if (node instanceof BinaryExpression bin && bin.operator.equals("+") && isStringType(resolveType(bin.left)) && isStringType(resolveType(bin.right))) {
             collectStringAddends(bin.left, addends);
@@ -1838,21 +1847,8 @@ public String visitExpressionStatement(ExpressionStatement node) {
         if ("string".equals(t1) || "string".equals(t2)) {
             if (node.operator.equals("+")) {
                 String tmpVar = "__bolt_tmp_" + (tempCounter++);
-                
-                StringBuilder oldBuilder = builder;
-                StringBuilder expr1Buf = new StringBuilder();
-                StringBuilder expr2Buf = new StringBuilder();
+                String call = null;
 
-                builder = expr1Buf;
-                node.left.accept(this);
-                String expr1 = expr1Buf.toString();
-
-                builder = expr2Buf;
-                node.right.accept(this);
-                String expr2 = expr2Buf.toString();
-                builder = oldBuilder;
-
-                String call;
                 if ("string".equals(t1) && "string".equals(t2)) {
                     List<ASTNode> addends = new ArrayList<>();
                     collectStringAddends(node, addends);
@@ -1860,27 +1856,26 @@ public String visitExpressionStatement(ExpressionStatement node) {
                         StringBuilder multiConcatBuf = new StringBuilder();
                         multiConcatBuf.append("__bolt_string_concat_n(").append(addends.size()).append(", ");
                         for (int i = 0; i < addends.size(); i++) {
-                            StringBuilder addendBuf = new StringBuilder();
-                            builder = addendBuf;
-                            addends.get(i).accept(this);
-                            multiConcatBuf.append(addendBuf.toString());
-                            builder = oldBuilder;
+                            multiConcatBuf.append(captureExpression(addends.get(i)));
                             if (i < addends.size() - 1) multiConcatBuf.append(", ");
                         }
                         multiConcatBuf.append(")");
                         call = multiConcatBuf.toString();
+                    }
+                }
+
+                if (call == null) {
+                    String expr1 = captureExpression(node.left);
+                    String expr2 = captureExpression(node.right);
+                    if ("string".equals(t1) && "int".equals(t2)) {
+                        call = "__bolt_concat_str_int(" + expr1 + ", " + expr2 + ")";
+                    } else if ("int".equals(t1) && "string".equals(t2)) {
+                        call = "__bolt_concat_int_str(" + expr1 + ", " + expr2 + ")";
                     } else {
                         call = "__bolt_string_concat(" + expr1 + ", " + expr2 + ")";
                     }
-                } else if ("string".equals(t1) && "int".equals(t2)) {
-                    call = "__bolt_concat_str_int(" + expr1 + ", " + expr2 + ")";
-                } else if ("int".equals(t1) && "string".equals(t2)) {
-                    call = "__bolt_concat_int_str(" + expr1 + ", " + expr2 + ")";
-                } else {
-                    // generic fallback for string concat
-                    call = "__bolt_string_concat(" + expr1 + ", " + expr2 + ")";
                 }
-                
+
                 tempStringDecls.add(new String[]{tmpVar, call});
                 builder.append(tmpVar);
                 return null;
@@ -2134,9 +2129,12 @@ public String visitExpressionStatement(ExpressionStatement node) {
             builder.append(opName).append("(");
             emitAsValue(node.operand);
             builder.append(")");
-        } else {
+        } else if (node.isPrefix) {
             builder.append(node.operator);
             emitOperand(node.operand);
+        } else {
+            emitOperand(node.operand);
+            builder.append(node.operator);
         }
         return null;
     }
@@ -2368,7 +2366,8 @@ public String visitExpressionStatement(ExpressionStatement node) {
         String initCode = initBuilder.toString();
         builder = oldBuilder;
 
-        for (String[] decl : tempStringDecls) {
+        List<String[]> declaredTemps = new ArrayList<>(tempStringDecls);
+        for (String[] decl : declaredTemps) {
             emitIndent();
             builder.append("char* ").append(decl[0]).append(" = ").append(decl[1]).append(";\n");
         }
@@ -2395,6 +2394,13 @@ public String visitExpressionStatement(ExpressionStatement node) {
             }
         }
         builder.append(";\n");
+
+        for (String[] decl : declaredTemps) {
+            if (!decl[0].equals(initCode)) {
+                emitIndent();
+                builder.append("free(").append(decl[0]).append(");\n");
+            }
+        }
 
         Symbol classSym = symbols.get(baseType);
         if (isStringType(baseType)) {

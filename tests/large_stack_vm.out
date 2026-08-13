@@ -13,3 +13,17 @@ classify(-5)=negative
 classify(0)=zero
 classify(8)=even
 classify(7)=odd
+decl 010
+decl 110
+decl 210
+comma 09
+comma 18
+comma 27
+both 05
+both 14
+both 23
+plain 3
+plain 4
+dinit 5
+dinit 6
+dinit 7
